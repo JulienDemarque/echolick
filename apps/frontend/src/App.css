@@ -1,0 +1,73 @@
+.app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+}
+
+.hint {
+  margin-bottom: 1rem;
+  color: #a7a7a7;
+}
+
+.card {
+  border: 1px solid #2b2b2b;
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: #141414;
+}
+
+.progression-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+@media (max-width: 740px) {
+  .progression-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+button {
+  border: 1px solid #3f3f3f;
+  background: #1f1f1f;
+  color: #f0f0f0;
+  border-radius: 8px;
+  padding: 0.5rem 0.8rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+pre {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  background: #0c0c0c;
+  border: 1px solid #2b2b2b;
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.error {
+  color: #ff6b6b;
+  margin: 0.5rem 0 0;
+}
+
+.note-line {
+  margin-top: 0.5rem;
+  color: #c7c7c7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

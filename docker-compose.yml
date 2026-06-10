@@ -1,0 +1,26 @@
+services:
+  backend:
+    build:
+      context: ./apps/backend
+    container_name: echolick-backend
+    ports:
+      - "8000:8000"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - ./apps/backend:/app
+
+  frontend:
+    build:
+      context: ./apps/frontend
+    container_name: echolick-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    volumes:
+      - ./apps/frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
