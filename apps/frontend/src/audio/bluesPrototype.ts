@@ -1,30 +1,5 @@
 import type { LickNote } from '../types/music'
 
-const CHORD_A7_MIDI = [57, 61, 64, 67]
-
-export const HARDCODED_A_MINOR_LICK: LickNote[] = [
-  { midi: 69, noteName: 'A4', start: 0, duration: 1, velocity: 0.82, technique: 'normal' },
-  { midi: 72, noteName: 'C5', start: 1, duration: 1, velocity: 0.86, technique: 'normal' },
-  {
-    midi: 74,
-    noteName: 'D5',
-    start: 2,
-    duration: 1,
-    velocity: 0.9,
-    technique: 'bend',
-    bend: { toMidi: 76, start: 0.12, end: 0.56 },
-  },
-  {
-    midi: 69,
-    noteName: 'A4',
-    start: 3,
-    duration: 1,
-    velocity: 0.84,
-    technique: 'vibrato',
-    vibrato: { depthSemitones: 0.2, rateHz: 5.6, start: 0.2 },
-  },
-]
-
 let sharedAudioContext: AudioContext | null = null
 let springImpulseCache: AudioBuffer | null = null
 
@@ -278,14 +253,6 @@ const playLeadNote = (
     noteGain.disconnect()
     filter.disconnect()
   }
-}
-
-export const playStaticPrototype = async (tempo = 76): Promise<void> => {
-  return playLickOverChord({
-    tempo,
-    chordMidi: CHORD_A7_MIDI,
-    notes: HARDCODED_A_MINOR_LICK,
-  })
 }
 
 type PlayLickOverChordArgs = {

@@ -1,7 +1,112 @@
 from app.models import GenerateLickRequest
 
 
+NOTE_TO_SEMITONE = {
+    "C": 0,
+    "C#": 1,
+    "D": 2,
+    "D#": 3,
+    "E": 4,
+    "F": 5,
+    "F#": 6,
+    "G": 7,
+    "G#": 8,
+    "A": 9,
+    "A#": 10,
+    "B": 11,
+}
+
+INTERVAL_LABELS = {
+    0: "1",
+    1: "b2",
+    2: "2",
+    3: "b3",
+    4: "3",
+    5: "4",
+    6: "#4/b5",
+    7: "5",
+    8: "#5/b6",
+    9: "6",
+    10: "b7",
+    11: "7",
+}
+
+KEY_A_REFERENCE = [
+    ("A", "1"),
+    ("B", "2"),
+    ("C", "b3"),
+    ("C#", "3"),
+    ("D", "4"),
+    ("E", "5"),
+    ("F#", "6"),
+    ("G", "b7"),
+]
+
+A_MAJOR_BLUES_POOL = ["A", "B", "C", "C#", "E", "F#"]
+D_MAJOR_BLUES_POOL = ["D", "E", "F", "F#", "A", "B"]
+
+CHORD_TONES_BY_CHORD = {
+    "A7": ["A", "C#", "E", "G"],
+    "D7": ["D", "F#", "A", "C"],
+    "E7": ["E", "G#", "B", "D"],
+}
+
+
+def _get_chord_root(chord: str) -> str:
+    if len(chord) >= 2 and chord[1] in {"#", "b"}:
+        return chord[:2]
+    return chord[:1]
+
+
+def _build_reference_context(payload: GenerateLickRequest) -> str:
+    if payload.flavor != "major":
+        return ""
+
+    chord = payload.chord
+    chord_root = _get_chord_root(chord)
+    chord_root_semitone = NOTE_TO_SEMITONE.get(chord_root, NOTE_TO_SEMITONE["A"])
+    chord_tones = set(CHORD_TONES_BY_CHORD.get(chord, []))
+
+    if chord == "D7":
+        pool = D_MAJOR_BLUES_POOL
+    else:
+        # Default major-blues pool anchored on A for I and V in this POC.
+        pool = A_MAJOR_BLUES_POOL
+
+    key_reference_lines = "\n".join(
+        [f"- {note}: degree vs key A = {degree}" for note, degree in KEY_A_REFERENCE]
+    )
+
+    pool_reference_lines = []
+    for note in pool:
+        note_semitone = NOTE_TO_SEMITONE.get(note)
+        if note_semitone is None:
+            continue
+        interval = (note_semitone - chord_root_semitone) % 12
+        interval_label = INTERVAL_LABELS[interval]
+        chord_role = "chord-tone" if note in chord_tones else "color/approach"
+        pool_reference_lines.append(
+            f"- {note}: interval vs {chord_root} = {interval_label}, role vs {chord} = {chord_role}"
+        )
+
+    pool_name = "D major blues pool" if chord == "D7" else "A major blues pool"
+    pool_reference = "\n".join(pool_reference_lines)
+
+    return f"""
+Theory references for MAJOR blues (use these intentionally):
+- Key-center note degrees relative to A:
+{key_reference_lines}
+- Active note pool for this bar ({pool_name}):
+{pool_reference}
+- Prioritize chord-tones on strong beats (1 and 3), then mix in color notes on weak beats.
+- In major blues, occasionally use b3 as a blue-note passing tone resolving to 3.
+""".strip()
+
+
 def build_generation_prompt(payload: GenerateLickRequest) -> str:
+    reference_context = _build_reference_context(payload)
+    reference_block = f"\n\n{reference_context}" if reference_context else ""
+
     return f"""
 You are generating a one-bar blues guitar lick for an ear-training app.
 
@@ -32,6 +137,7 @@ Constraints:
 - Keep it playable on guitar
 - Avoid large random jumps
 - Make it sound like a short call-and-response phrase
+{reference_block}
 
 Return this exact JSON shape:
 {{

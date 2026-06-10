@@ -353,3 +353,41 @@ Copy this template for each chunk update:
   - Compare quality/latency tradeoffs across `gpt-5-mini` vs faster alternatives (for example `gpt-4.1-mini`) and pick default per UX target.
 - Risks/blockers:
   - GPT-5 mini improves quality potential but is significantly slower for this endpoint in current setup.
+
+### 2026-06-11 01:58 - CHUNK-01-CLEANUP
+- Status: done
+- Completed:
+  - Removed the Phase 1 static prototype UI card and playback button from the main app screen.
+  - Deleted dead frontend code for hardcoded static prototype exports no longer used by current flow.
+  - Removed unused legacy stylesheet (`App.css`) left over from pre-Tailwind iteration.
+  - Added safe degree-to-chord MIDI resolution helper for replay/generate playback path.
+  - Verified frontend compiles successfully after cleanup (`npm run build`).
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `apps/frontend/src/audio/bluesPrototype.ts`
+  - `apps/frontend/src/App.css` (deleted)
+  - `docs/TODO.md`
+- Next best step:
+  - Continue CHUNK-04 by adding backend tests for invalid model payloads and fallback behavior.
+- Risks/blockers:
+  - None.
+
+### 2026-06-11 02:03 - CHUNK-07B-THEORY-INFORMED-PROMPT
+- Status: done
+- Completed:
+  - Enhanced backend prompt with theory reference injection for major-blues generation:
+    - key-degree references relative to A root
+    - per-note interval labels relative to current chord root
+    - explicit chord-tone vs color-note role guidance
+    - focused major blues pools for A7 and D7 bars
+  - Added prompt instruction emphasis to blend chord tones with blue-note color in major blues.
+  - Updated frontend generate payload default flavor from `minor` to `major` for current testing direction.
+  - Verified backend Python compile and frontend build pass.
+- Files changed:
+  - `apps/backend/app/services/prompt.py`
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - Observe new traces and compare note-choice quality on I vs IV bars (A7 vs D7), then tune pool/chord-tone weighting as needed.
+- Risks/blockers:
+  - Prompt-only improvements can still produce occasional outliers; fallback remains required.
