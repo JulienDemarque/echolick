@@ -23,6 +23,14 @@ POC stack:
 - `POST /api/generate-lick` placeholder endpoint returning a valid fallback lick
 - Frontend UI buttons to call both endpoints and display returned JSON
 
+## Observability (Langfuse)
+
+Set these variables to enable OpenAI call tracing from backend:
+
+- `LANGFUSE_PUBLIC_KEY`
+- `LANGFUSE_SECRET_KEY`
+- `LANGFUSE_HOST` (defaults to `https://cloud.langfuse.com`)
+
 ## Docs and planning
 
 - Roadmap: `docs/echolick_blues_poc_roadmap.md`

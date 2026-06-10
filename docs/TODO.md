@@ -12,7 +12,8 @@ Use this file as the shared handoff anchor between chat threads.
 - [x] CHUNK-02A: Adopt Zustand (state) + TanStack Query (server state) in frontend
 - [x] CHUNK-02B: Adopt Tailwind CSS + reusable Tailwind UI component layer
 - [x] CHUNK-05A: Improve guitar tone with separated rhythm/lead buses and FX chain
-- [ ] CHUNK-03: Implement roadmap Phase 3 (`POST /api/generate-lick` real LLM path + placeholder fallback)
+- [x] CHUNK-05B: Tie progression and lick generation (Next Bar -> generate + play on next chord)
+- [x] CHUNK-03: Implement roadmap Phase 3 (`POST /api/generate-lick` real LLM path + placeholder fallback)
 - [ ] CHUNK-04: Implement roadmap Phase 4 (strict validation + fallback on invalid outputs)
 - [ ] CHUNK-05: Implement roadmap Phase 5 (play chord + generated lick together)
 - [ ] CHUNK-06: Implement roadmap Phase 6 (major/minor toggle wired end-to-end)
@@ -138,6 +139,97 @@ Copy this template for each chunk update:
   - Continue CHUNK-03 for real backend LLM generation path.
 - Risks/blockers:
   - FX levels are currently hardcoded for a musical baseline; expose controls later if you want interactive tone shaping.
+
+### 2026-06-11 00:04 - CHUNK-05B
+- Status: done
+- Completed:
+  - Wired progression and lick together so `Next Bar + Generate` advances to the next bar, requests a lick for that next degree/chord, and immediately plays chord + generated lick.
+  - Added chord MIDI mapping by degree and reusable playback function for arbitrary generated licks.
+  - Kept manual `Generate Current Bar Lick` for testing without progression advance.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `apps/frontend/src/audio/bluesPrototype.ts`
+  - `apps/frontend/src/music/progression.ts`
+  - `apps/frontend/src/api/client.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - Start CHUNK-03 backend LLM integration behind `OPENAI_API_KEY`, while preserving fallback.
+- Risks/blockers:
+  - If user clicks very fast, generated playback can overlap (acceptable for now; can add transport cancel/queue later).
+
+### 2026-06-11 00:10 - CHUNK-03
+- Status: done
+- Completed:
+  - Added OpenAI-backed lick generation path in backend when `OPENAI_API_KEY` is present.
+  - Added strict post-generation validation checks (bar bounds, bend/vibrato limits, timing constraints).
+  - Kept guaranteed fallback behavior: any LLM/JSON/validation failure logs warning and returns procedural lick.
+  - Added reusable prompt builder and configurable `OPENAI_MODEL` env.
+  - Updated Compose backend to load `apps/backend/.env` via `env_file`.
+  - Rebuilt backend container to install `openai` package and verified endpoint returns valid payload.
+- Files changed:
+  - `apps/backend/requirements.txt`
+  - `apps/backend/app/services/generator.py`
+  - `apps/backend/app/services/prompt.py`
+  - `docker-compose.yml`
+  - `.env.example`
+  - `docs/TODO.md`
+- Next best step:
+  - Start CHUNK-04: formalize schema-level validators/tests and fallback coverage for malformed LLM payloads.
+- Risks/blockers:
+  - LLM call currently uses SDK default timeout/retry behavior; tune explicit timeout/retry strategy if latency spikes.
+
+### 2026-06-11 00:14 - CHUNK-05C
+- Status: done
+- Completed:
+  - Simplified frontend control flow to the requested two actions: `Next Bar + Generate` and `Replay`.
+  - Removed extra API/debug controls from the main UX (health check and separate current-bar generation controls).
+  - Wired replay to play the last successfully generated lick/chord without bar advancement.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-04 validation hardening/tests for malformed LLM output handling.
+- Risks/blockers:
+  - Progression reset action is no longer exposed in UI; can re-add if needed later.
+
+### 2026-06-11 00:22 - CHUNK-03A
+- Status: done
+- Completed:
+  - Added frontend OpenAPI codegen workflow (`@hey-api/openapi-ts`) and generated typed SDK from backend `/openapi.json`.
+  - Replaced manual frontend API calls with generated SDK wrappers and runtime base URL config.
+  - Added normalization layer so generated nullable note fields map cleanly to audio playback types.
+  - Updated backend OpenAI call to request strict JSON Schema-constrained output from the model.
+- Files changed:
+  - `apps/frontend/package.json`
+  - `apps/frontend/package-lock.json`
+  - `apps/frontend/src/api/client.ts`
+  - `apps/frontend/src/api/generated/*`
+  - `apps/frontend/src/App.tsx`
+  - `apps/backend/app/services/generator.py`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-04: add backend tests covering invalid model payloads and fallback paths.
+- Risks/blockers:
+  - Generated SDK defaults include a hardcoded base URL in generated file; runtime wrapper overrides it per request.
+
+### 2026-06-11 00:30 - CHUNK-OBS-LANGFUSE
+- Status: done
+- Completed:
+  - Added Langfuse SDK dependency to backend and integrated OpenAI client through `langfuse.openai` wrapper for tracing.
+  - Added Langfuse environment variables to Compose backend service and `.env.example`.
+  - Documented Langfuse setup in `README.md`.
+  - Recreated backend and verified `/api/generate-lick` still returns valid payload.
+- Files changed:
+  - `apps/backend/requirements.txt`
+  - `apps/backend/app/services/generator.py`
+  - `docker-compose.yml`
+  - `.env.example`
+  - `README.md`
+  - `docs/TODO.md`
+- Next best step:
+  - Set real `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` in `apps/backend/.env` and verify traces in Langfuse UI.
+- Risks/blockers:
+  - Without Langfuse credentials configured, tracing is disabled by SDK (no data sent).
 
 ### 2026-06-10 23:58 - CHUNK-OPS-IGNORE
 - Status: done

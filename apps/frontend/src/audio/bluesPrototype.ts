@@ -281,14 +281,32 @@ const playLeadNote = (
 }
 
 export const playStaticPrototype = async (tempo = 76): Promise<void> => {
+  return playLickOverChord({
+    tempo,
+    chordMidi: CHORD_A7_MIDI,
+    notes: HARDCODED_A_MINOR_LICK,
+  })
+}
+
+type PlayLickOverChordArgs = {
+  tempo?: number
+  chordMidi: number[]
+  notes: LickNote[]
+}
+
+export const playLickOverChord = async ({
+  tempo = 76,
+  chordMidi,
+  notes,
+}: PlayLickOverChordArgs): Promise<void> => {
   const ctx = await getAudioContext()
   const beatSeconds = 60 / tempo
   const barDurationSec = beatSeconds * 4
   const start = ctx.currentTime + 0.06
   const mix = createMixBuses(ctx, start)
 
-  playChord(ctx, start, barDurationSec, CHORD_A7_MIDI, mix.rhythmInput)
-  HARDCODED_A_MINOR_LICK.forEach((note) =>
+  playChord(ctx, start, barDurationSec, chordMidi, mix.rhythmInput)
+  notes.forEach((note) =>
     playLeadNote(ctx, note, start, beatSeconds, mix.leadInput),
   )
 }

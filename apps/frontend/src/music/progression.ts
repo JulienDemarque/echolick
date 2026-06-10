@@ -21,6 +21,12 @@ export const CHORDS_BY_DEGREE: Record<Degree, string> = {
   V: 'E7',
 }
 
+export const CHORD_MIDI_BY_DEGREE: Record<Degree, number[]> = {
+  I: [57, 61, 64, 67],
+  IV: [62, 66, 69, 72],
+  V: [64, 68, 71, 74],
+}
+
 export const getCurrentDegree = (barIndex: number): Degree =>
   BLUES_PROGRESSION[barIndex % BLUES_PROGRESSION.length]
 
