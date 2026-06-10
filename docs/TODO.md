@@ -231,6 +231,24 @@ Copy this template for each chunk update:
 - Risks/blockers:
   - Without Langfuse credentials configured, tracing is disabled by SDK (no data sent).
 
+### 2026-06-11 00:35 - CHUNK-OBS-LOCAL-LANGFUSE
+- Status: done
+- Completed:
+  - Added optional local self-hosted Langfuse overlay (`docker-compose.langfuse.yml`) based on Langfuse official multi-service compose stack.
+  - Added local env template for backend (`apps/backend/.env.langfuse.local.example`) with required values and defaults.
+  - Added README run instructions for local observability profile.
+  - Validated compose merge and successfully started local stack (`langfuse-web`, `langfuse-worker`, `clickhouse`, `postgres`, `redis`, `minio`).
+  - Verified local Langfuse web responds on `http://localhost:3000` (HTTP 200).
+- Files changed:
+  - `docker-compose.langfuse.yml`
+  - `apps/backend/.env.langfuse.local.example`
+  - `README.md`
+  - `docs/TODO.md`
+- Next best step:
+  - Create a project in local Langfuse UI, copy project public/secret keys into `apps/backend/.env`, and generate a test lick to confirm traces appear.
+- Risks/blockers:
+  - Local self-host adds 6 additional infrastructure containers (heavier than cloud mode).
+
 ### 2026-06-10 23:58 - CHUNK-OPS-IGNORE
 - Status: done
 - Completed:
@@ -245,3 +263,93 @@ Copy this template for each chunk update:
   - Continue CHUNK-03 (backend LLM generation path).
 - Risks/blockers:
   - Creating dot-prefixed Cursor ignore files (`.cursorignore`) is blocked by local permissions policy in this workspace.
+
+### 2026-06-11 00:40 - CHUNK-OBS-LANGFUSE-SKILL
+- Status: done
+- Completed:
+  - Installed the official Langfuse agent skill via `npx skills add langfuse/skills --skill "langfuse"`.
+  - Audited existing tracing against skill baseline requirements (trace naming, span hierarchy, sensitive input scope, fallback visibility).
+  - Added explicit root span tracing around `generate_lick` with descriptive `trace_name`, request tags, and constrained trace input/output payloads.
+  - Added graceful fallback when Langfuse tracing itself errors so observability cannot break lick generation.
+  - Added `LANGFUSE_BASE_URL` compatibility to Compose/env templates and updated README with verification guidance.
+- Files changed:
+  - `apps/backend/app/services/generator.py`
+  - `docker-compose.yml`
+  - `.env.example`
+  - `apps/backend/.env.langfuse.local.example`
+  - `README.md`
+  - `docs/TODO.md`
+- Next best step:
+  - Run one end-to-end request with valid Langfuse keys and inspect traces filtered by `feature:lick-generation` to confirm expected tags/output fields.
+- Risks/blockers:
+  - If Langfuse Python SDK API changes for `propagate_attributes` or observation update fields, tracing metadata may need small follow-up adjustments.
+
+### 2026-06-11 01:10 - CHUNK-OBS-LANGFUSE-CONNECTIVITY
+- Status: done
+- Completed:
+  - Restarted/rebuilt backend container to reload env (`docker compose up -d --build backend`).
+  - Fixed Compose env precedence bug by removing backend `environment:` overrides that were forcing empty values over `apps/backend/.env`.
+  - Verified backend now receives non-empty OpenAI/Langfuse API keys from `apps/backend/.env`.
+  - Updated backend Langfuse endpoint from `localhost` to Docker service hostname (`http://langfuse-web:3000`).
+  - Removed NextAuth/bootstrap variables from backend env template to keep backend-only config focused.
+  - Re-ran Langfuse SDK auth check from backend container; result is `True`.
+  - Verified request logs no longer show `localhost:3000` export failures.
+- Files changed:
+  - `docker-compose.yml`
+  - `apps/backend/.env`
+  - `apps/backend/.env.langfuse.local.example`
+  - `docs/TODO.md`
+- Next best step:
+  - Optionally move Langfuse self-host infra bootstrap vars (NextAuth/DB/Redis/MinIO credentials) into a dedicated root env template for observability profile overrides.
+- Risks/blockers:
+  - None for connectivity; current fallback logs are from model output validation and are expected when generated note bends violate constraints.
+
+### 2026-06-11 01:12 - CHUNK-04A-OPENAI-STRICT-SCHEMA
+- Status: done
+- Completed:
+  - Diagnosed OpenAI Responses API strict schema failure (`additionalProperties` / `required`) from terminal logs.
+  - Added JSON schema normalization for OpenAI strict mode in backend (`additionalProperties: false` on object nodes and `required` aligned to all object properties).
+  - Re-tested `POST /api/generate-lick`; strict schema API error is gone and backend now reaches content validation/fallback path instead.
+  - Normalized Langfuse metadata value type for `tempo` to string to avoid dropped metadata warnings.
+- Files changed:
+  - `apps/backend/app/services/generator.py`
+  - `docs/TODO.md`
+- Next best step:
+  - Decide whether to keep strict schema mode or simplify by removing strict response schema and relying on Pydantic validation + fallback.
+- Risks/blockers:
+  - Strict schema normalization depends on OpenAI’s current validator behavior and may need revisiting if API requirements change.
+
+### 2026-06-11 01:15 - CHUNK-OBS-LOCAL-ONLY-CONFIG
+- Status: done
+- Completed:
+  - Confirmed backend is using local Langfuse endpoint (`LANGFUSE_BASE_URL=http://langfuse-web:3000`) and not cloud.
+  - Updated docs/env defaults to local self-hosted Langfuse references (removed cloud default wording from active project config docs).
+  - Verified backend Langfuse client connectivity remains healthy after updates (`auth_check: True`).
+- Files changed:
+  - `README.md`
+  - `.env.example`
+  - `docs/TODO.md`
+- Next best step:
+  - Optionally add a dedicated `.env.observability.example` at repo root for Langfuse infra bootstrap variables used by `docker-compose.langfuse.yml`.
+- Risks/blockers:
+  - None.
+
+### 2026-06-11 01:24 - CHUNK-07A-PROMPT-QUALITY-MODEL
+- Status: done
+- Completed:
+  - Strengthened generation prompt constraints to explicitly require note-local timing for bend/vibrato fields.
+  - Added post-parse normalization for articulation timing to recover common bar-time outputs before validation.
+  - Switched default backend model target to GPT-5 mini (`OPENAI_MODEL=gpt-5-mini`) for quality-first testing.
+  - Updated env templates and local backend env to include explicit `OPENAI_MODEL`.
+  - Benchmarked API latency after change: ~33-40s per generation in current environment.
+- Files changed:
+  - `apps/backend/app/services/prompt.py`
+  - `apps/backend/app/services/generator.py`
+  - `.env.example`
+  - `apps/backend/.env.langfuse.local.example`
+  - `apps/backend/.env`
+  - `docs/TODO.md`
+- Next best step:
+  - Compare quality/latency tradeoffs across `gpt-5-mini` vs faster alternatives (for example `gpt-4.1-mini`) and pick default per UX target.
+- Risks/blockers:
+  - GPT-5 mini improves quality potential but is significantly slower for this endpoint in current setup.

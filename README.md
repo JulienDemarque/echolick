@@ -29,7 +29,28 @@ Set these variables to enable OpenAI call tracing from backend:
 
 - `LANGFUSE_PUBLIC_KEY`
 - `LANGFUSE_SECRET_KEY`
-- `LANGFUSE_HOST` (defaults to `https://cloud.langfuse.com`)
+- `LANGFUSE_HOST` or `LANGFUSE_BASE_URL` (for local Docker: `http://langfuse-web:3000`)
+
+Tracing best-practice defaults in backend:
+
+- Root span is named `generate-lick-request` and trace name is `api.generate-lick`
+- Trace input is explicitly scoped to musical request fields only
+- Tags are added for filtering (`feature:lick-generation`, `degree:*`, `flavor:*`)
+- Trace output captures source (`openai` vs `fallback`) and fallback reason when applicable
+
+### Run Langfuse locally (self-hosted)
+
+1. Create backend env for local Langfuse:
+   - `cp apps/backend/.env.langfuse.local.example apps/backend/.env`
+2. Start app + local observability stack:
+   - `docker compose -f docker-compose.yml -f docker-compose.langfuse.yml --profile observability up -d --build`
+3. Open local Langfuse:
+   - `http://localhost:3000`
+
+Notes:
+- This uses the official multi-service Langfuse Docker Compose stack.
+- For local tracing to work, set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` in `apps/backend/.env` (from your local Langfuse project settings).
+- Generate a lick request after startup, then check Langfuse `Traces` and filter by `feature:lick-generation`.
 
 ## Docs and planning
 
