@@ -564,3 +564,125 @@ Copy this template for each chunk update:
   - Replace stage dropdown with real gamification progression logic (unlocks, automatic stage advancement, and reward feedback).
 - Risks/blockers:
   - Starter-stage note snapping is heuristic and can alter melodic contour; backend-aware staged generation would produce cleaner pedagogical phrases.
+
+### 2026-06-11 16:12 - CHUNK-DB-01-SUPABASE-SCHEMA
+- Status: done
+- Completed:
+  - Added a dedicated Supabase planning/spec doc covering:
+    - relational schema (`licks`, `lick_notes`, `practice_attempts`, `generation_runs`)
+    - enum strategy and constraints
+    - difficulty model and stage mapping
+    - initial library generation + quality filtering strategy
+    - baseline RLS/access approach
+  - Added Supabase env placeholders to `.env.example`.
+  - Linked Supabase schema doc and setup notes from `README.md`.
+- Files changed:
+  - `docs/supabase_schema.md`
+  - `.env.example`
+  - `README.md`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-DB-02: create first SQL migration for enums + `licks` + `lick_notes` + indexes, then run it in Supabase SQL Editor.
+- Risks/blockers:
+  - RLS policies are documented but not yet applied; actual table exposure depends on Supabase dashboard/API settings until migration is executed.
+
+### 2026-06-11 16:31 - CHUNK-DB-SEMANTICS-ALIGN-A
+- Status: done
+- Completed:
+  - Reworked Supabase schema documentation to a minimal semantic model agreed in chat:
+    - `forms` (full chord grid container)
+    - `form_bars` (bar-level chord context)
+    - `licks` (bar-linked phrase + `note_policy` + `notes_json`)
+    - optional `lick_notes` for later SQL analytics
+  - Simplified theory vocabulary by collapsing overlapping concepts into one `note_policy`.
+  - Documented what remains derived (`difficulty_level`, app stage logic) vs persisted in v1.
+- Files changed:
+  - `docs/supabase_schema.md`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-DB-02-MINIMAL-MIGRATION: write and run Supabase SQL migration for `forms`, `form_bars`, `licks` (+ optional `lick_notes` toggle).
+- Risks/blockers:
+  - `bar_index` versus `forms.bar_count` consistency is app-validated in v1; DB-level trigger enforcement can be added later.
+
+### 2026-06-11 16:37 - CHUNK-DB-DIAGRAM-A
+- Status: done
+- Completed:
+  - Added a Mermaid ER diagram to `docs/supabase_schema.md` for quick visual review of core v1 entities and relationships.
+  - Cleaned duplicated legacy schema section from the same doc to keep a single authoritative version.
+- Files changed:
+  - `docs/supabase_schema.md`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-DB-02-MINIMAL-MIGRATION: convert diagram/entities into executable Supabase SQL migration.
+- Risks/blockers:
+  - Mermaid rendering depends on editor/support; if unsupported, keep an ASCII fallback diagram in docs.
+
+### 2026-06-11 16:49 - CHUNK-OPS-ENV-ALIGN-A
+- Status: done
+- Completed:
+  - Added `apps/backend/.env.example` as backend runtime env template (OpenAI, Langfuse, Supabase keys).
+  - Reduced root `.env.example` to compose-level variable(s) only (`VITE_API_BASE_URL`) to avoid confusion with backend runtime env.
+  - Updated README startup instructions to use `apps/backend/.env` as required backend env source and clarified root `.env` as optional compose interpolation.
+- Files changed:
+  - `apps/backend/.env.example`
+  - `.env.example`
+  - `README.md`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-DB-02-MINIMAL-MIGRATION: create and run Supabase SQL migration for `forms`, `form_bars`, `licks`.
+- Risks/blockers:
+  - Existing local setup may still have stale assumptions/scripts expecting backend secrets in root `.env`; those scripts should be updated if present.
+
+### 2026-06-11 16:58 - CHUNK-DB-CLIENT-A
+- Status: done
+- Completed:
+  - Added backend Supabase client helper using `supabase-py` (`get_supabase_client()` with cache).
+  - Wired env resolution to prefer `SUPABASE_SERVICE_ROLE_KEY` and support `SUPABASE_KEY` as compatibility alias.
+  - Added `supabase` dependency to backend requirements.
+  - Updated backend env example with optional `SUPABASE_KEY` alias note.
+- Files changed:
+  - `apps/backend/app/services/supabase_client.py`
+  - `apps/backend/requirements.txt`
+  - `apps/backend/.env.example`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-DB-02-MINIMAL-MIGRATION: create `forms`/`form_bars`/`licks` tables in Supabase and add first read/write endpoint integration.
+- Risks/blockers:
+  - Backend container must be rebuilt to install the new `supabase` package before using the client at runtime.
+
+### 2026-06-11 17:07 - CHUNK-DB-02-MINIMAL-MIGRATION
+- Status: done
+- Completed:
+  - Added Supabase SQL migration for minimal v1 schema:
+    - `forms`
+    - `form_bars`
+    - `licks`
+    - indexes + RLS enable defaults
+  - Added Supabase seed SQL for initial 12-bar forms in keys `E`, `A`, `B`, `C` with bar-by-bar chord mapping.
+  - Updated README with explicit SQL execution order for schema + seed.
+  - Cleaned and re-normalized `docs/supabase_schema.md` to remove duplicate sections and keep one authoritative minimal spec.
+- Files changed:
+  - `db/supabase/001_init_minimal_schema.sql`
+  - `db/supabase/002_seed_forms_eabc.sql`
+  - `docs/supabase_schema.md`
+  - `README.md`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-DB-03-REPO-INTEGRATION: add backend repository helpers and first endpoints to read forms and save generated licks to Supabase.
+- Risks/blockers:
+  - With RLS enabled and no anon/auth policies yet, table access is backend service-role only (intended for now).
+
+### 2026-06-11 17:19 - CHUNK-DB-SEED-A
+- Status: done
+- Completed:
+  - Added backend seed script (`apps/backend/scripts/seed_licks.py`) to generate and insert initial licks into Supabase from active seeded forms.
+  - Script supports configurable source tag, tempo, policy set, and optional cleanup (`--clear-existing`) for repeatable reseeding.
+  - Documented seed command and options in README.
+- Files changed:
+  - `apps/backend/scripts/seed_licks.py`
+  - `README.md`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-DB-03-REPO-INTEGRATION: add backend endpoints/repository for reading forms and loading licks by form/bar/policy.
+- Risks/blockers:
+  - Current seed generation uses existing `GenerateLickRequest` contract (`key="A"` literal in model); form-specific key semantics are currently represented by form/bar chord context.

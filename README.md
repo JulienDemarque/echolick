@@ -9,11 +9,13 @@ POC stack:
 
 ## Run with Docker Compose
 
-1. Copy env file:
+1. Create backend runtime env (required):
+   - `cp apps/backend/.env.example apps/backend/.env`
+2. (Optional) create root compose override env:
    - `cp .env.example .env`
-2. Build and start:
+3. Build and start:
    - `docker compose up --build`
-3. Open:
+4. Open:
    - Frontend: `http://localhost:5173`
    - Backend docs: `http://localhost:8000/docs`
 
@@ -51,9 +53,50 @@ Notes:
 - This uses the official multi-service Langfuse Docker Compose stack.
 - For local tracing to work, set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` in `apps/backend/.env` (from your local Langfuse project settings).
 - Generate a lick request after startup, then check Langfuse `Traces` and filter by `feature:lick-generation`.
+- Root `.env` is only for compose-level variable interpolation; backend service env is loaded from `apps/backend/.env`.
 
 ## Docs and planning
 
 - Roadmap: `docs/echolick_blues_poc_roadmap.md`
 - Stack decision: `docs/stack_and_repo_decision.md`
 - Chunked TODO + thread handoff log: `docs/TODO.md`
+- Supabase schema + difficulty/library plan: `docs/supabase_schema.md`
+
+## Supabase (setup prep)
+
+When wiring persistence, set these env vars:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+Notes:
+
+- Keep `SUPABASE_SERVICE_ROLE_KEY` backend-only.
+- Prefer backend-mediated writes for now; frontend can remain API-driven.
+
+### Run initial schema + form seed
+
+In Supabase SQL Editor, run in order:
+
+1. `db/supabase/001_init_minimal_schema.sql`
+2. `db/supabase/002_seed_forms_eabc.sql`
+
+This creates minimal v1 tables (`forms`, `form_bars`, `licks`) and seeds 12-bar basic forms for keys `E`, `A`, `B`, and `C`.
+
+### Seed initial licks (backend script)
+
+From `apps/backend`:
+
+- `python scripts/seed_licks.py --clear-existing`
+
+Useful options:
+
+- `--tempo 76`
+- `--source seed_v1`
+- `--policies major_penta_root minor_penta_root mix_major_minor`
+
+Notes:
+
+- Script reads active forms/bars from Supabase and inserts rows into `licks`.
+- It uses existing backend generation logic (`generate_lick`), so `OPENAI_API_KEY` behavior/fallbacks apply.
