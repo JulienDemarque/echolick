@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
   postGenerateChorus,
@@ -51,14 +51,59 @@ type PitchSegment = PitchPoint[]
 type UserPitchFeedbackPoint = PitchPoint & {
   isCorrect: boolean
 }
+type PracticeStageId = 'starter' | 'bends' | 'mixed'
 
 const TARGET_CONTOUR_STEP_BEATS = 0.03
 const SCORE_TIME_TOLERANCE_BEATS = 0.4
 const SCORE_PITCH_TOLERANCE_SEMITONES = 1.8
+const STARTER_MAX_NOTES = 4
+const STARTER_TARGET_INTERVALS = [0, 2, 4]
+
+const PRACTICE_STAGES: Array<{
+  id: PracticeStageId
+  label: string
+  description: string
+}> = [
+  {
+    id: 'starter',
+    label: 'Starter: 4 notes on 1-2-3',
+    description: 'Uses 4 notes snapped to 3 target tones. No bends/vibrato.',
+  },
+  {
+    id: 'bends',
+    label: 'Stage 2: add bends',
+    description: 'Full generated phrase with bends/vibrato, still single flavor.',
+  },
+  {
+    id: 'mixed',
+    label: 'Stage 3: mix major/minor',
+    description: 'Full phrase, and each generate can switch between major and minor flavor.',
+  },
+]
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
 const frequencyToMidi = (frequencyHz: number): number => 69 + 12 * Math.log2(frequencyHz / 440)
 
 const clampBeat = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value))
+const midiToPitchClass = (midi: number): number => ((Math.round(midi) % 12) + 12) % 12
+const midiToNoteName = (midi: number): string => NOTE_NAMES[midiToPitchClass(midi)] ?? 'C'
+
+const nearestMidiForPitchClass = (sourceMidi: number, pitchClass: number): number => {
+  let best = sourceMidi
+  let bestDistance = Number.POSITIVE_INFINITY
+  const sourceOctave = Math.round(sourceMidi / 12)
+
+  for (let octaveOffset = -2; octaveOffset <= 2; octaveOffset += 1) {
+    const candidate = (sourceOctave + octaveOffset) * 12 + pitchClass
+    const distance = Math.abs(candidate - sourceMidi)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = candidate
+    }
+  }
+
+  return best
+}
 
 const buildNotePitchContour = (note: LickNote, tempo: number): PitchSegment => {
   const durationBeats = Math.max(note.duration, 0)
@@ -123,6 +168,42 @@ const getClosestContourMidi = (segment: PitchSegment, time: number): number | nu
   return bestMidi
 }
 
+const applyPracticeStageToLick = (
+  lick: GenerateLickResponse,
+  stage: PracticeStageId,
+): GenerateLickResponse => {
+  if (stage !== 'starter') {
+    return lick
+  }
+
+  const chordRoot = resolveChordMidi(lick.degree)[0] ?? 60
+  const chordRootPitchClass = midiToPitchClass(chordRoot)
+  const targetPitchClasses = STARTER_TARGET_INTERVALS.map((interval) => (chordRootPitchClass + interval) % 12)
+
+  const stagedNotes = lick.notes.slice(0, STARTER_MAX_NOTES).map((note) => {
+    const snappedMidiCandidates = targetPitchClasses.map((pitchClass) =>
+      nearestMidiForPitchClass(note.midi, pitchClass),
+    )
+    const snappedMidi = snappedMidiCandidates.reduce((best, candidate) =>
+      Math.abs(candidate - note.midi) < Math.abs(best - note.midi) ? candidate : best,
+    )
+
+    return {
+      ...note,
+      midi: snappedMidi,
+      noteName: midiToNoteName(snappedMidi),
+      bend: undefined,
+      vibrato: undefined,
+      technique: 'normal' as const,
+    }
+  })
+
+  return {
+    ...lick,
+    notes: stagedNotes,
+  }
+}
+
 const detectPitchHz = (buffer: Float32Array<ArrayBuffer>, sampleRate: number): number | null => {
   let rms = 0
   for (let i = 0; i < buffer.length; i += 1) {
@@ -171,6 +252,7 @@ function App() {
   const [lickByBar, setLickByBar] = useState<Record<number, GenerateLickResponse>>({})
   const [activeBeat, setActiveBeat] = useState<number | null>(null)
   const [practicePhase, setPracticePhase] = useState<PracticePhase>('idle')
+  const [practiceStage, setPracticeStage] = useState<PracticeStageId>('starter')
   const [micStatus, setMicStatus] = useState<MicStatus>('off')
   const [micError, setMicError] = useState<string>('')
   const [userPitchPoints, setUserPitchPoints] = useState<PitchPoint[]>([])
@@ -190,6 +272,7 @@ function App() {
   const currentDegree = getCurrentDegree(barIndex)
   const currentChord = CHORDS_BY_DEGREE[currentDegree]
   const selectedLick = lickByBar[barIndex] ?? null
+  const selectedPracticeStage = PRACTICE_STAGES.find((stage) => stage.id === practiceStage) ?? PRACTICE_STAGES[0]
   const selectedLickNotes = useMemo(
     () => (selectedLick ? normalizeLickNotes(selectedLick.notes) : []),
     [selectedLick],
@@ -485,7 +568,7 @@ function App() {
     onSuccess: (data) => {
       const nextByBar: Record<number, GenerateLickResponse> = {}
       data.bars.forEach((bar, index) => {
-        nextByBar[index] = bar
+        nextByBar[index] = applyPracticeStageToLick(bar, practiceStage)
       })
       setLickByBar(nextByBar)
       setAudioError('')
@@ -496,12 +579,13 @@ function App() {
     mutationFn: ({ payload }: { bar: number; payload: GenerateLickRequest }) =>
       postGenerateLick(apiBaseUrl, payload),
     onSuccess: (data, variables) => {
-      setLickByBar((prev) => ({ ...prev, [variables.bar]: data }))
-      startPracticeCycle(data.tempo)
+      const stagedLick = applyPracticeStageToLick(data, practiceStage)
+      setLickByBar((prev) => ({ ...prev, [variables.bar]: stagedLick }))
+      startPracticeCycle(stagedLick.tempo)
       void playLickOverChord({
-        tempo: data.tempo,
-        chordMidi: resolveChordMidi(data.degree),
-        notes: normalizeLickNotes(data.notes),
+        tempo: stagedLick.tempo,
+        chordMidi: resolveChordMidi(stagedLick.degree),
+        notes: normalizeLickNotes(stagedLick.notes),
       }).catch((e) => {
         setAudioError(e instanceof Error ? e.message : 'Failed to play generated lick')
       })
@@ -519,6 +603,9 @@ function App() {
     const degree = getCurrentDegree(targetBar)
     const chord = CHORDS_BY_DEGREE[degree]
 
+    const flavor: 'major' | 'minor' =
+      practiceStage === 'mixed' ? (Math.random() < 0.5 ? 'major' : 'minor') : 'major'
+
     setAudioError('')
     generateMutation.reset()
     generateMutation.mutate({
@@ -527,7 +614,7 @@ function App() {
         key: 'A',
         degree,
         chord,
-        flavor: 'major',
+        flavor,
         tempo: 76,
       },
     })
@@ -554,7 +641,7 @@ function App() {
     generateForBar(barIndex)
   }
 
-  const replaySelectedBar = () => {
+  const replaySelectedBar = useCallback(() => {
     if (!selectedLick) return
     setAudioError('')
     startPracticeCycle(selectedLick.tempo)
@@ -565,7 +652,26 @@ function App() {
     }).catch((e) => {
       setAudioError(e instanceof Error ? e.message : 'Failed to replay selected bar lick')
     })
-  }
+  }, [selectedLick, startPracticeCycle])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== 'Space') return
+      const target = event.target as HTMLElement | null
+      const tagName = target?.tagName
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || target?.isContentEditable) {
+        return
+      }
+      if (!selectedLick || isGenerating) return
+      event.preventDefault()
+      replaySelectedBar()
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [isGenerating, replaySelectedBar, selectedLick])
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-8">
@@ -622,6 +728,23 @@ function App() {
           })}
         </div>
         <div className="flex flex-wrap gap-2">
+          <label className="flex min-w-64 flex-col gap-1 text-xs text-zinc-300">
+            <span className="font-medium text-zinc-200">Practice Stage</span>
+            <select
+              value={practiceStage}
+              onChange={(event) => setPracticeStage(event.target.value as PracticeStageId)}
+              className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
+            >
+              {PRACTICE_STAGES.map((stage) => (
+                <option key={stage.id} value={stage.id}>
+                  {stage.label}
+                </option>
+              ))}
+            </select>
+            <span className="text-[11px] text-zinc-400">{selectedPracticeStage.description}</span>
+          </label>
+        </div>
+        <div className="flex flex-wrap gap-2">
           <Button onClick={generateFullChorus} variant="primary" disabled={isGenerating}>
             {chorusMutation.isPending ? 'Generating 12 Bars...' : 'Generate Full 12 Bars'}
           </Button>
@@ -634,6 +757,9 @@ function App() {
           <Button onClick={replaySelectedBar} disabled={!selectedLick || isGenerating}>
             Replay Selected Bar
           </Button>
+          <span className="self-center text-xs text-zinc-400">
+            Tip: press <kbd className="rounded border border-zinc-700 px-1 py-0.5 text-[10px]">Space</kbd> to replay.
+          </span>
         </div>
         {!selectedLick ? (
           <p className="text-xs text-zinc-500">

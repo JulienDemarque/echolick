@@ -546,3 +546,21 @@ Copy this template for each chunk update:
   - Add optional confidence/margins visualization (for example yellow "near miss" points) and expose tolerance controls in UI.
 - Risks/blockers:
   - Point-level nearest-contour matching can mark noisy off-time captures as incorrect even when nearby note-level match is satisfied.
+
+### 2026-06-11 12:00 - CHUNK-UX-PROGRESSION-STAGES-A
+- Status: done
+- Completed:
+  - Added a practice-stage dropdown in frontend to prototype progressive gameplay paths.
+  - Implemented stage behavior:
+    - `Starter`: limits generated lick to 4 notes, snaps notes to 3 target tones (1-2-3 relative to chord root), removes bend/vibrato.
+    - `Add bends`: keeps full generated phrase articulation in a single flavor flow.
+    - `Mix major/minor`: keeps full phrase and randomly requests major or minor flavor per generation.
+  - Added keyboard UX shortcut: `Space` replays selected bar (with guards to avoid triggering while typing in form fields).
+  - Added replay keyboard hint next to controls.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - Replace stage dropdown with real gamification progression logic (unlocks, automatic stage advancement, and reward feedback).
+- Risks/blockers:
+  - Starter-stage note snapping is heuristic and can alter melodic contour; backend-aware staged generation would produce cleaner pedagogical phrases.
