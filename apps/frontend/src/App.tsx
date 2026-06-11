@@ -48,8 +48,13 @@ const MAX_CAPTURE_BEATS = 4
 
 type MicStatus = 'off' | 'ready' | 'capturing'
 type PitchSegment = PitchPoint[]
+type UserPitchFeedbackPoint = PitchPoint & {
+  isCorrect: boolean
+}
 
 const TARGET_CONTOUR_STEP_BEATS = 0.03
+const SCORE_TIME_TOLERANCE_BEATS = 0.4
+const SCORE_PITCH_TOLERANCE_SEMITONES = 1.8
 
 const frequencyToMidi = (frequencyHz: number): number => 69 + 12 * Math.log2(frequencyHz / 440)
 
@@ -103,6 +108,20 @@ const buildNotePitchContour = (note: LickNote, tempo: number): PitchSegment => {
 
 const buildTargetPitchSegments = (notes: LickNote[], tempo: number): PitchSegment[] =>
   notes.map((note) => buildNotePitchContour(note, tempo)).filter((segment) => segment.length > 0)
+
+const getClosestContourMidi = (segment: PitchSegment, time: number): number | null => {
+  if (segment.length === 0) return null
+  let bestMidi = segment[0].midi
+  let bestDistance = Math.abs(segment[0].time - time)
+  for (let i = 1; i < segment.length; i += 1) {
+    const distance = Math.abs(segment[i].time - time)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      bestMidi = segment[i].midi
+    }
+  }
+  return bestMidi
+}
 
 const detectPitchHz = (buffer: Float32Array<ArrayBuffer>, sampleRate: number): number | null => {
   let rms = 0
@@ -165,6 +184,7 @@ function App() {
   const captureBeatMsRef = useRef<number>(0)
   const smoothedMidiRef = useRef<number | null>(null)
   const pitchCaptureRafRef = useRef<number | null>(null)
+  const metronomeAudioContextRef = useRef<AudioContext | null>(null)
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
   const currentDegree = getCurrentDegree(barIndex)
@@ -178,6 +198,61 @@ function App() {
     () => buildTargetPitchSegments(selectedLickNotes, selectedLick?.tempo ?? 76),
     [selectedLick?.tempo, selectedLickNotes],
   )
+  const flattenedTargetContour = useMemo(() => targetPitchSegments.flat(), [targetPitchSegments])
+  const noteMatches = useMemo(() => {
+    if (selectedLickNotes.length === 0) return []
+
+    return selectedLickNotes.map((note, index) => {
+      const segment = targetPitchSegments[index] ?? []
+      const windowStart = Math.max(0, note.start - SCORE_TIME_TOLERANCE_BEATS)
+      const windowEnd = Math.min(4, note.start + note.duration + SCORE_TIME_TOLERANCE_BEATS)
+
+      const candidatePoints = userPitchPoints.filter(
+        (point) => point.time >= windowStart && point.time <= windowEnd,
+      )
+
+      if (candidatePoints.length === 0) return false
+
+      return candidatePoints.some((point) => {
+        const expectedMidi = getClosestContourMidi(segment, point.time) ?? note.midi
+        return Math.abs(point.midi - expectedMidi) <= SCORE_PITCH_TOLERANCE_SEMITONES
+      })
+    })
+  }, [selectedLickNotes, targetPitchSegments, userPitchPoints])
+
+  const score = useMemo(() => {
+    const total = selectedLickNotes.length
+    if (total === 0) {
+      return { total: 0, matched: 0, percentage: 0 }
+    }
+    const matched = noteMatches.filter(Boolean).length
+    const percentage = Math.round((matched / total) * 100)
+    return { total, matched, percentage }
+  }, [noteMatches, selectedLickNotes.length])
+  const userPitchFeedbackPoints = useMemo<UserPitchFeedbackPoint[]>(() => {
+    if (flattenedTargetContour.length === 0 || userPitchPoints.length === 0) return []
+
+    return userPitchPoints.map((point) => {
+      let nearest: PitchPoint | null = null
+      let nearestDistance = Number.POSITIVE_INFINITY
+
+      for (let i = 0; i < flattenedTargetContour.length; i += 1) {
+        const candidate = flattenedTargetContour[i]
+        const distance = Math.abs(candidate.time - point.time)
+        if (distance < nearestDistance) {
+          nearestDistance = distance
+          nearest = candidate
+        }
+      }
+
+      if (!nearest || nearestDistance > SCORE_TIME_TOLERANCE_BEATS) {
+        return { ...point, isCorrect: false }
+      }
+
+      const isCorrect = Math.abs(point.midi - nearest.midi) <= SCORE_PITCH_TOLERANCE_SEMITONES
+      return { ...point, isCorrect }
+    })
+  }, [flattenedTargetContour, userPitchPoints])
 
   const stopPitchCaptureLoop = () => {
     if (pitchCaptureRafRef.current !== null) {
@@ -187,6 +262,39 @@ function App() {
     captureWindowStartMsRef.current = null
     smoothedMidiRef.current = null
     setMicStatus(micAnalyserRef.current ? 'ready' : 'off')
+  }
+
+  const ensureMetronomeAudioContext = () => {
+    if (!metronomeAudioContextRef.current) {
+      metronomeAudioContextRef.current = new AudioContext()
+    }
+    if (metronomeAudioContextRef.current.state === 'suspended') {
+      void metronomeAudioContextRef.current.resume()
+    }
+    return metronomeAudioContextRef.current
+  }
+
+  const playMetronomeClick = (accent: boolean) => {
+    const ctx = ensureMetronomeAudioContext()
+    const now = ctx.currentTime
+
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    const tone = ctx.createBiquadFilter()
+    tone.type = 'highpass'
+    tone.frequency.setValueAtTime(600, now)
+
+    osc.type = 'triangle'
+    osc.frequency.setValueAtTime(accent ? 1450 : 980, now)
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.linearRampToValueAtTime(accent ? 0.22 : 0.15, now + 0.004)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055)
+
+    osc.connect(tone)
+    tone.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(now)
+    osc.stop(now + 0.065)
   }
 
   const capturePitchFrame = (frameTimeMs: number) => {
@@ -308,6 +416,7 @@ function App() {
       const timeoutId = window.setTimeout(() => {
         setPracticePhase(beat < 4 ? 'listen' : 'your-turn')
         setActiveBeat(beat % 4)
+        playMetronomeClick(beat % 4 === 0)
       }, PLAYBACK_START_DELAY_MS + beat * beatMs)
       metronomeTimeoutsRef.current.push(timeoutId)
     }
@@ -348,6 +457,10 @@ function App() {
         void micAudioContextRef.current.close()
       }
       micAudioContextRef.current = null
+      if (metronomeAudioContextRef.current) {
+        void metronomeAudioContextRef.current.close()
+      }
+      metronomeAudioContextRef.current = null
     },
     [],
   )
@@ -540,7 +653,7 @@ function App() {
       <Card className="space-y-3">
         <CardTitle>Metronome + Turn</CardTitle>
         <p className="text-xs text-zinc-400">
-          First bar is listen/playback, second bar is your turn to sing or play the phrase.
+          First bar is listen/playback, second bar is your turn to sing or play the phrase. Click track runs through both bars.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => void enableMicrophone()} disabled={micStatus !== 'off'}>
@@ -589,8 +702,33 @@ function App() {
       <Card className="space-y-3">
         <CardTitle>Pitch Timeline (Time X / Pitch Y)</CardTitle>
         <p className="text-xs text-zinc-400">
-          Blue contour shows generated target pitch with bend/vibrato. Green points are live user pitch capture.
+          Blue contour shows target pitch. User points are green when correct, red when off target.
         </p>
+        <p className="text-sm text-zinc-200">
+          Score:{' '}
+          <strong>
+            {score.matched}/{score.total} ({score.percentage}%)
+          </strong>
+          <span className="ml-2 text-xs text-zinc-400">
+            (forgiving mode: one close capture per note is enough)
+          </span>
+        </p>
+        {noteMatches.length > 0 ? (
+          <div className="flex flex-wrap gap-1 text-xs">
+            {noteMatches.map((isMatch, index) => (
+              <span
+                key={`note-hit-${index}`}
+                className={`rounded border px-2 py-1 ${
+                  isMatch
+                    ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-300'
+                    : 'border-rose-500/60 bg-rose-500/15 text-rose-300'
+                }`}
+              >
+                N{index + 1} {isMatch ? 'OK' : 'MISS'}
+              </span>
+            ))}
+          </div>
+        ) : null}
         <svg
           viewBox="0 0 1000 240"
           className="h-56 w-full rounded-lg border border-zinc-800 bg-zinc-950"
@@ -608,25 +746,6 @@ function App() {
               strokeWidth={1}
             />
           ))}
-
-          {selectedLickNotes.map((note, index) => {
-            const x = (note.start / 4) * 1000
-            const width = Math.max((note.duration / 4) * 1000, 8)
-            const ratio = (note.midi - pitchRange.minMidi) / (pitchRange.maxMidi - pitchRange.minMidi || 1)
-            const y = 220 - ratio * 200
-            return (
-              <rect
-                key={`${note.start}-${note.midi}-${index}`}
-                x={x}
-                y={y - 5}
-                width={width}
-                height={10}
-                rx={3}
-                fill="#60a5fa"
-                opacity={0.85}
-              />
-            )
-          })}
 
           {targetPitchSegments.map((segment, segmentIndex) => {
             const points = segment
@@ -652,11 +771,19 @@ function App() {
             )
           })}
 
-          {userPitchPoints.map((point, index) => {
+          {userPitchFeedbackPoints.map((point, index) => {
             const x = (point.time / 4) * 1000
             const ratio = (point.midi - pitchRange.minMidi) / (pitchRange.maxMidi - pitchRange.minMidi || 1)
             const y = 220 - ratio * 200
-            return <circle key={`${point.time}-${index}`} cx={x} cy={y} r={3} fill="#34d399" />
+            return (
+              <circle
+                key={`${point.time}-${index}`}
+                cx={x}
+                cy={y}
+                r={3}
+                fill={point.isCorrect ? '#34d399' : '#f43f5e'}
+              />
+            )
           })}
         </svg>
       </Card>

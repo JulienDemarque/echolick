@@ -490,3 +490,59 @@ Copy this template for each chunk update:
   - Add a simple alignment score by nearest-time pitch distance between user capture points and target contour.
 - Risks/blockers:
   - Vibrato shape is currently modeled as pure sine; real playing may have asymmetry and attack lag not represented in the target curve.
+
+### 2026-06-11 11:39 - CHUNK-UX-PITCH-CAPTURE-C
+- Status: done
+- Completed:
+  - Simplified pitch timeline target rendering to show only the articulation contour (bend/vibrato curve).
+  - Removed flat target note blocks to keep the chart focused on the most correct target pitch description.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - Add alignment scoring against the contour and optional tolerance bands (for example +/- 25 cents) to guide practice feedback.
+- Risks/blockers:
+  - Pure contour view is cleaner, but some users may still want optional note-block references for note onset visibility.
+
+### 2026-06-11 11:46 - CHUNK-UX-SCORING-A
+- Status: done
+- Completed:
+  - Added first-pass user playback scoring in frontend with forgiving matching rules.
+  - Implemented per-note match logic: a note is counted correct if at least one user pitch point is near it in time and pitch.
+  - Scoring compares user points to the articulation contour (bend/vibrato) at nearby times, with wide default tolerances for early usability.
+  - Added score display (`matched/total` + percentage) in the pitch timeline card.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - Add adjustable scoring sensitivity controls (time and pitch tolerance sliders) and evaluate defaults.
+- Risks/blockers:
+  - This forgiving metric can over-score sparse captures; later iterations should include coverage and sustained-intonation checks.
+
+### 2026-06-11 11:49 - CHUNK-UX-METRONOME-AUDIO-A
+- Status: done
+- Completed:
+  - Added audible metronome click track in frontend synchronized to the 8-beat practice cycle.
+  - Kept click track active through both bars: target lick playback (listen) and user capture (your turn).
+  - Added bar-accent behavior (strong click on beat 1 of each bar) for easier phrase orientation.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - Add optional metronome controls (mute/volume and accent level) to adapt to different practice setups.
+- Risks/blockers:
+  - WebAudio scheduling via `setTimeout` is sufficient for now but can drift slightly under heavy main-thread load.
+
+### 2026-06-11 11:53 - CHUNK-UX-SCORING-B
+- Status: done
+- Completed:
+  - Added point-level correctness classification for captured user pitch points against the target contour.
+  - Updated timeline rendering to color user pitch points by correctness (`green=correct`, `red=incorrect`).
+  - Added per-note hit/miss badges (`N1 OK`, `N2 MISS`, etc.) based on existing forgiving note matching logic.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - Add optional confidence/margins visualization (for example yellow "near miss" points) and expose tolerance controls in UI.
+- Risks/blockers:
+  - Point-level nearest-contour matching can mark noisy off-time captures as incorrect even when nearby note-level match is satisfied.
