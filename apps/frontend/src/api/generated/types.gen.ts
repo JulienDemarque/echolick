@@ -23,6 +23,24 @@ export type Bend = {
 };
 
 /**
+ * GenerateChorusRequest
+ */
+export type GenerateChorusRequest = {
+    /**
+     * Key
+     */
+    key?: 'A';
+    /**
+     * Flavor
+     */
+    flavor: 'minor' | 'major';
+    /**
+     * Tempo
+     */
+    tempo: number;
+};
+
+/**
  * GenerateLickRequest
  */
 export type GenerateLickRequest = {
@@ -46,6 +64,41 @@ export type GenerateLickRequest = {
      * Tempo
      */
     tempo: number;
+};
+
+/**
+ * GeneratedChorus
+ */
+export type GeneratedChorus = {
+    /**
+     * Key
+     */
+    key?: 'A';
+    /**
+     * Flavor
+     */
+    flavor: 'minor' | 'major';
+    /**
+     * Tempo
+     */
+    tempo: number;
+    /**
+     * Bars
+     */
+    bars: [
+        GeneratedLick,
+        GeneratedLick,
+        GeneratedLick,
+        GeneratedLick,
+        GeneratedLick,
+        GeneratedLick,
+        GeneratedLick,
+        GeneratedLick,
+        GeneratedLick,
+        GeneratedLick,
+        GeneratedLick,
+        GeneratedLick
+    ];
 };
 
 /**
@@ -204,3 +257,28 @@ export type GenerateLickRouteApiGenerateLickPostResponses = {
 };
 
 export type GenerateLickRouteApiGenerateLickPostResponse = GenerateLickRouteApiGenerateLickPostResponses[keyof GenerateLickRouteApiGenerateLickPostResponses];
+
+export type GenerateChorusRouteApiGenerateChorusPostData = {
+    body: GenerateChorusRequest;
+    path?: never;
+    query?: never;
+    url: '/api/generate-chorus';
+};
+
+export type GenerateChorusRouteApiGenerateChorusPostErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type GenerateChorusRouteApiGenerateChorusPostError = GenerateChorusRouteApiGenerateChorusPostErrors[keyof GenerateChorusRouteApiGenerateChorusPostErrors];
+
+export type GenerateChorusRouteApiGenerateChorusPostResponses = {
+    /**
+     * Successful Response
+     */
+    200: GeneratedChorus;
+};
+
+export type GenerateChorusRouteApiGenerateChorusPostResponse = GenerateChorusRouteApiGenerateChorusPostResponses[keyof GenerateChorusRouteApiGenerateChorusPostResponses];

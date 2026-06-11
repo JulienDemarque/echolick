@@ -1,5 +1,8 @@
 import {
+  generateChorusRouteApiGenerateChorusPost,
   generateLickRouteApiGenerateLickPost,
+  type GenerateChorusRequest,
+  type GeneratedChorus,
   healthcheckHealthGet,
   type GenerateLickRequest,
   type GeneratedLick,
@@ -8,8 +11,9 @@ import {
 import { client as generatedClient } from './generated/client.gen'
 
 export type GenerateLickResponse = GeneratedLick
+export type GenerateChorusResponse = GeneratedChorus
 export type HealthResponse = HealthcheckHealthGetResponse
-export type { GenerateLickRequest }
+export type { GenerateChorusRequest, GenerateLickRequest }
 
 const withBaseUrl = (apiBaseUrl: string) => {
   generatedClient.setConfig({ baseUrl: apiBaseUrl })
@@ -42,6 +46,23 @@ export const postGenerateLick = async (
   }
   if (!data) {
     throw new Error('Generate failed: empty response payload')
+  }
+  return data
+}
+
+export const postGenerateChorus = async (
+  apiBaseUrl: string,
+  payload: GenerateChorusRequest,
+): Promise<GenerateChorusResponse> => {
+  const { data, error } = await generateChorusRouteApiGenerateChorusPost({
+    client: withBaseUrl(apiBaseUrl),
+    body: payload,
+  })
+  if (error) {
+    throw new Error(`Generate chorus failed: ${JSON.stringify(error)}`)
+  }
+  if (!data) {
+    throw new Error('Generate chorus failed: empty response payload')
   }
   return data
 }

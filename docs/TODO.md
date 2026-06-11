@@ -391,3 +391,102 @@ Copy this template for each chunk update:
   - Observe new traces and compare note-choice quality on I vs IV bars (A7 vs D7), then tune pool/chord-tone weighting as needed.
 - Risks/blockers:
   - Prompt-only improvements can still produce occasional outliers; fallback remains required.
+
+### 2026-06-11 09:43 - CHUNK-UX-12BAR-GRID-A
+- Status: done
+- Completed:
+  - Added interactive 12-bar grid UI with selectable bars showing degree/chord labels and per-bar generation status indicator.
+  - Refactored generation flow to support generating by explicit bar index while preserving existing API payload.
+  - Added `Generate Selected Bar`, `Next Bar + Generate`, and `Replay Selected Bar` controls.
+  - Updated lick panel to display JSON for the currently selected bar instead of last global generation.
+  - Verified frontend build succeeds after UI/state refactor.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-UX-12BAR-GRID-B: add beat-level metronome/playhead visualization (`1-2-3-4`) synced to bar playback and include a short "your turn" phase indicator.
+- Risks/blockers:
+  - Current generation still requests one bar at a time; full 12-bar pre-generation API remains a follow-up chunk.
+
+### 2026-06-11 10:02 - CHUNK-CHORUS-12BAR-BATCH
+- Status: done
+- Completed:
+  - Added backend `POST /api/generate-chorus` endpoint to generate a full 12-bar blues chorus in one request.
+  - Introduced chorus request/response models (`GenerateChorusRequest`, `GeneratedChorus`) and wired service orchestration over `I IV I I IV IV I I V IV I V`.
+  - Regenerated frontend OpenAPI SDK and added `postGenerateChorus` client wrapper.
+  - Updated frontend progression controls with `Generate Full 12 Bars` action that fills per-bar lick cache for immediate bar selection/replay.
+  - Verified backend Python compile and frontend build pass.
+- Files changed:
+  - `apps/backend/app/models.py`
+  - `apps/backend/app/services/generator.py`
+  - `apps/backend/app/main.py`
+  - `apps/frontend/src/api/generated/*`
+  - `apps/frontend/src/api/client.ts`
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-UX-12BAR-GRID-B: add metronome/playhead + "your turn" state now that bar library cache can be preloaded.
+- Risks/blockers:
+  - Full-chorus generation can be slow/costly with current model since it performs 12 serial generations.
+
+### 2026-06-11 11:06 - CHUNK-CHORUS-SINGLE-CALL
+- Status: done
+- Completed:
+  - Reworked chorus generation backend path to use one OpenAI call for the full 12-bar payload (`GeneratedChorus`) instead of 12 per-bar calls.
+  - Added dedicated chorus prompt builder with explicit progression-level constraints and output schema guidance.
+  - Added chorus-level validation + normalization pass and chorus-level Langfuse tracing (`api.generate-chorus`).
+  - Kept robust fallback behavior by returning a full procedural 12-bar chorus if single-call generation fails.
+  - Smoke-tested inside backend container: valid 12-bar chorus returned (`bars=12`).
+- Files changed:
+  - `apps/backend/app/services/prompt.py`
+  - `apps/backend/app/services/generator.py`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-UX-12BAR-GRID-B: add beat-level metronome/playhead + "your turn" indicator synced to selected bar playback.
+- Risks/blockers:
+  - Single-call chorus with current GPT-5 model can still be high latency (tested ~154s end-to-end in this environment).
+
+### 2026-06-11 11:22 - CHUNK-UX-12BAR-GRID-B
+- Status: done
+- Completed:
+  - Added beat-level metronome UI (`1-2-3-4`) that runs in a two-bar practice cycle whenever selected-bar playback starts.
+  - Added explicit phase indicator (`Listen` then `Your turn`) to support call-and-response practice flow.
+  - Added a pitch timeline panel with time on X axis and MIDI pitch on Y axis.
+  - Plotted generated lick notes as target bars in the timeline and scaffolded a user-pitch overlay layer for next-step mic capture.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - Start CHUNK-UX-PITCH-CAPTURE-A: capture live user pitch from microphone, map it to MIDI over time, and render green points into the existing timeline overlay.
+- Risks/blockers:
+  - Metronome is currently visual-only (no click sound), and user pitch capture layer is scaffolded but not yet wired to microphone input.
+
+### 2026-06-11 11:29 - CHUNK-UX-PITCH-CAPTURE-A
+- Status: done
+- Completed:
+  - Added live microphone capture controls in frontend (`Enable Mic Capture` / `Disable Mic`).
+  - Implemented real-time pitch detection from mic input using normalized autocorrelation over time-domain audio frames.
+  - Added continuous MIDI smoothing and plotting during the `Your turn` bar so bends are represented as gradual pitch motion in the timeline.
+  - Wired capture window timing to the practice cycle so user pitch points align to beat time (X axis in beats).
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - Add bend-aware target overlay (expanded from note-level bend metadata) and simple pitch deviation scoring against user capture.
+- Risks/blockers:
+  - Browser mic quality/noise and room acoustics can still cause jitter or missed detections; threshold/smoothing constants may need per-device tuning.
+
+### 2026-06-11 11:35 - CHUNK-UX-PITCH-CAPTURE-B
+- Status: done
+- Completed:
+  - Replaced flat target-note rendering with a generated pitch contour derived from note articulation metadata.
+  - Added bend visualization by interpolating MIDI over bend span (`bend.start` to `bend.end`).
+  - Added vibrato visualization by applying sinusoidal semitone modulation using note vibrato rate/depth and bar tempo.
+  - Kept base note blocks in the timeline as reference while overlaying the blue contour path for true target shape.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - Add a simple alignment score by nearest-time pitch distance between user capture points and target contour.
+- Risks/blockers:
+  - Vibrato shape is currently modeled as pure sine; real playing may have asymmetry and attack lag not represented in the target curve.

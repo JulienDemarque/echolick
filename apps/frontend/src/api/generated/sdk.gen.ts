@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { GenerateLickRouteApiGenerateLickPostData, GenerateLickRouteApiGenerateLickPostErrors, GenerateLickRouteApiGenerateLickPostResponses, HealthcheckHealthGetData, HealthcheckHealthGetResponses } from './types.gen';
+import type { GenerateChorusRouteApiGenerateChorusPostData, GenerateChorusRouteApiGenerateChorusPostErrors, GenerateChorusRouteApiGenerateChorusPostResponses, GenerateLickRouteApiGenerateLickPostData, GenerateLickRouteApiGenerateLickPostErrors, GenerateLickRouteApiGenerateLickPostResponses, HealthcheckHealthGetData, HealthcheckHealthGetResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -28,6 +28,18 @@ export const healthcheckHealthGet = <ThrowOnError extends boolean = false>(optio
  */
 export const generateLickRouteApiGenerateLickPost = <ThrowOnError extends boolean = false>(options: Options<GenerateLickRouteApiGenerateLickPostData, ThrowOnError>) => (options.client ?? client).post<GenerateLickRouteApiGenerateLickPostResponses, GenerateLickRouteApiGenerateLickPostErrors, ThrowOnError>({
     url: '/api/generate-lick',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Generate Chorus Route
+ */
+export const generateChorusRouteApiGenerateChorusPost = <ThrowOnError extends boolean = false>(options: Options<GenerateChorusRouteApiGenerateChorusPostData, ThrowOnError>) => (options.client ?? client).post<GenerateChorusRouteApiGenerateChorusPostResponses, GenerateChorusRouteApiGenerateChorusPostErrors, ThrowOnError>({
+    url: '/api/generate-chorus',
     ...options,
     headers: {
         'Content-Type': 'application/json',

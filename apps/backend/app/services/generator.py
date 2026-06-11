@@ -6,12 +6,19 @@ import time
 from langfuse.openai import OpenAI
 from langfuse import get_client, propagate_attributes
 
-from app.models import GeneratedLick, GenerateLickRequest
+from app.models import (
+    GeneratedChorus,
+    GeneratedLick,
+    GenerateChorusRequest,
+    GenerateLickRequest,
+)
 from app.services.fallback_licks import build_fallback_lick
-from app.services.prompt import build_generation_prompt
+from app.services.prompt import build_chorus_generation_prompt, build_generation_prompt
 
 logger = logging.getLogger(__name__)
 langfuse = get_client()
+BLUES_PROGRESSION = ["I", "IV", "I", "I", "IV", "IV", "I", "I", "V", "IV", "I", "V"]
+CHORD_BY_DEGREE = {"I": "A7", "IV": "D7", "V": "E7"}
 
 
 def _to_openai_strict_json_schema(node: object) -> object:
@@ -132,6 +139,92 @@ def _build_trace_output(
     return output
 
 
+def _build_chorus_trace_output(
+    chorus: GeneratedChorus, source: str, model: str | None = None, fallback_reason: str | None = None
+) -> dict[str, object]:
+    output: dict[str, object] = {
+        "source": source,
+        "bar_count": len(chorus.bars),
+        "total_notes": sum(len(bar.notes) for bar in chorus.bars),
+    }
+    if model is not None:
+        output["model"] = model
+    if fallback_reason is not None:
+        output["fallback_reason"] = fallback_reason
+    return output
+
+
+def _build_fallback_chorus(payload: GenerateChorusRequest) -> GeneratedChorus:
+    bars: list[GeneratedLick] = []
+    for degree in BLUES_PROGRESSION:
+        bars.append(
+            build_fallback_lick(
+                GenerateLickRequest(
+                    key=payload.key,
+                    degree=degree,
+                    chord=CHORD_BY_DEGREE[degree],
+                    flavor=payload.flavor,
+                    tempo=payload.tempo,
+                )
+            )
+        )
+
+    return GeneratedChorus(
+        key=payload.key,
+        flavor=payload.flavor,
+        tempo=payload.tempo,
+        bars=bars,
+    )
+
+
+def _validate_generated_chorus(chorus: GeneratedChorus) -> None:
+    if len(chorus.bars) != 12:
+        raise ValueError("chorus must contain exactly 12 bars")
+
+    for index, expected_degree in enumerate(BLUES_PROGRESSION):
+        bar = chorus.bars[index]
+        expected_chord = CHORD_BY_DEGREE[expected_degree]
+
+        if bar.degree != expected_degree:
+            raise ValueError(f"bar {index + 1} degree mismatch: expected {expected_degree}")
+        if bar.chord != expected_chord:
+            raise ValueError(f"bar {index + 1} chord mismatch: expected {expected_chord}")
+        _validate_generated_lick(bar)
+
+
+def _generate_chorus_with_openai(payload: GenerateChorusRequest, api_key: str) -> GeneratedChorus:
+    client = OpenAI(api_key=api_key)
+    model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+    prompt = build_chorus_generation_prompt(payload)
+    schema = _to_openai_strict_json_schema(GeneratedChorus.model_json_schema())
+
+    started_at = time.perf_counter()
+    response = client.responses.create(
+        model=model,
+        input=prompt,
+        text={
+            "format": {
+                "type": "json_schema",
+                "name": "generated_chorus",
+                "schema": schema,
+                "strict": True,
+            }
+        },
+    )
+    elapsed_s = time.perf_counter() - started_at
+    logger.info("OpenAI chorus generation completed in %.2fs with model=%s", elapsed_s, model)
+
+    raw = (response.output_text or "").strip()
+    if not raw:
+        raise ValueError("LLM returned empty output for chorus")
+
+    parsed = json.loads(raw)
+    chorus = GeneratedChorus.model_validate(parsed)
+    chorus.bars = [_normalize_articulation_timing(bar) for bar in chorus.bars]
+    _validate_generated_chorus(chorus)
+    return chorus
+
+
 def generate_lick(payload: GenerateLickRequest) -> GeneratedLick:
     model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
     llm_key = os.getenv("OPENAI_API_KEY")
@@ -197,3 +290,74 @@ def generate_lick(payload: GenerateLickRequest) -> GeneratedLick:
         except Exception as exc:
             logger.warning("LLM lick generation failed, using fallback: %s", exc)
             return build_fallback_lick(payload)
+
+
+def generate_chorus(payload: GenerateChorusRequest) -> GeneratedChorus:
+    model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+    llm_key = os.getenv("OPENAI_API_KEY")
+    trace_input = {
+        "key": payload.key,
+        "flavor": payload.flavor,
+        "tempo": payload.tempo,
+        "bars": 12,
+    }
+    trace_tags = [
+        "feature:chorus-generation",
+        "shape:12-bar",
+        f"flavor:{payload.flavor}",
+    ]
+    trace_metadata = {
+        "endpoint": "/api/generate-chorus",
+        "tempo": str(payload.tempo),
+    }
+
+    span_ctx = langfuse.start_as_current_observation(
+        as_type="span",
+        name="generate-chorus-request",
+        input=trace_input,
+    )
+    attrs_ctx = propagate_attributes(
+        trace_name="api.generate-chorus",
+        tags=trace_tags,
+        metadata=trace_metadata,
+    )
+
+    try:
+        with span_ctx as span, attrs_ctx:
+            if not llm_key:
+                fallback = _build_fallback_chorus(payload)
+                span.update(
+                    output=_build_chorus_trace_output(
+                        fallback,
+                        source="fallback",
+                        model=model,
+                        fallback_reason="missing_openai_api_key",
+                    )
+                )
+                return fallback
+
+            try:
+                chorus = _generate_chorus_with_openai(payload, llm_key)
+                span.update(output=_build_chorus_trace_output(chorus, source="openai", model=model))
+                return chorus
+            except Exception as exc:
+                logger.warning("LLM chorus generation failed, using fallback: %s", exc)
+                fallback = _build_fallback_chorus(payload)
+                span.update(
+                    output=_build_chorus_trace_output(
+                        fallback,
+                        source="fallback",
+                        model=model,
+                        fallback_reason=type(exc).__name__,
+                    )
+                )
+                return fallback
+    except Exception as trace_exc:
+        logger.warning("Langfuse tracing failed, continuing without tracing: %s", trace_exc)
+        if not llm_key:
+            return _build_fallback_chorus(payload)
+        try:
+            return _generate_chorus_with_openai(payload, llm_key)
+        except Exception as exc:
+            logger.warning("LLM chorus generation failed, using fallback: %s", exc)
+            return _build_fallback_chorus(payload)

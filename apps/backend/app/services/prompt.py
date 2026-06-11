@@ -1,4 +1,4 @@
-from app.models import GenerateLickRequest
+from app.models import GenerateChorusRequest, GenerateLickRequest
 
 
 NOTE_TO_SEMITONE = {
@@ -165,6 +165,63 @@ Return this exact JSON shape:
         "start": 0.15
       }},
       "technique": "normal"
+    }}
+  ]
+}}
+""".strip()
+
+
+def build_chorus_generation_prompt(payload: GenerateChorusRequest) -> str:
+    return f"""
+You are generating a 12-bar blues chorus for an ear-training app.
+
+Return valid JSON only. No markdown. No explanation.
+
+Global constraints:
+- Key: {payload.key}
+- Flavor: {payload.flavor}
+- Tempo: {payload.tempo}
+- Time signature: 4/4
+- Generate exactly 12 bars with this progression:
+  1:I(A7), 2:IV(D7), 3:I(A7), 4:I(A7), 5:IV(D7), 6:IV(D7),
+  7:I(A7), 8:I(A7), 9:V(E7), 10:IV(D7), 11:I(A7), 12:V(E7)
+- Keep each bar musically cohesive and make phrase continuity across bars
+- For each bar, use 4 to 8 notes
+- All notes must fit within 0 <= start < 4 and end by beat 4
+- Articulation timing must be note-local:
+  - bend.start and bend.end are offsets within note duration
+  - vibrato.start is offset within note duration
+  - 0 <= bend.start < bend.end <= note.duration
+  - 0 <= vibrato.start <= note.duration
+- Include at most one bend and at most two vibrato markings per bar
+- Prioritize chord tones on strong beats while mixing major/minor blues color tones
+- Keep it playable on guitar and avoid random large jumps
+
+Return this exact JSON shape:
+{{
+  "key": "A",
+  "flavor": "{payload.flavor}",
+  "tempo": {payload.tempo},
+  "bars": [
+    {{
+      "key": "A",
+      "degree": "I",
+      "chord": "A7",
+      "flavor": "{payload.flavor}",
+      "tempo": {payload.tempo},
+      "timeSignature": "4/4",
+      "notes": [
+        {{
+          "midi": 69,
+          "noteName": "A4",
+          "start": 0,
+          "duration": 0.5,
+          "velocity": 0.8,
+          "bend": null,
+          "vibrato": null,
+          "technique": "normal"
+        }}
+      ]
     }}
   ]
 }}

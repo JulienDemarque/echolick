@@ -45,6 +45,12 @@ class GenerateLickRequest(BaseModel):
     tempo: int = Field(ge=40, le=220)
 
 
+class GenerateChorusRequest(BaseModel):
+    key: Literal["A"] = "A"
+    flavor: BluesFlavor
+    tempo: int = Field(ge=40, le=220)
+
+
 class GeneratedLick(BaseModel):
     key: Literal["A"] = "A"
     degree: Degree
@@ -53,3 +59,10 @@ class GeneratedLick(BaseModel):
     tempo: int = Field(ge=40, le=220)
     timeSignature: Literal["4/4"] = "4/4"
     notes: list[LickNote] = Field(min_length=1, max_length=12)
+
+
+class GeneratedChorus(BaseModel):
+    key: Literal["A"] = "A"
+    flavor: BluesFlavor
+    tempo: int = Field(ge=40, le=220)
+    bars: list[GeneratedLick] = Field(min_length=12, max_length=12)
