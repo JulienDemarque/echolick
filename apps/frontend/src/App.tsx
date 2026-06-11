@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type GenerateLickResponse } from './api/client'
 import { playLickOverChord } from './audio/bluesPrototype'
-import { Button } from './components/ui/button'
-import { Card, CardTitle } from './components/ui/card'
+import { ConfigurationCard } from './features/practice/components/ConfigurationCard'
+import { MetronomeCard } from './features/practice/components/MetronomeCard'
+import { ProgressionCard } from './features/practice/components/ProgressionCard'
+import { SelectedLickCard } from './features/practice/components/SelectedLickCard'
+import { TimelineCard } from './features/practice/components/TimelineCard'
 import {
   BLUES_FORM_MAP,
-  BLUES_FORM_OPTIONS,
   DEGREE_LEVEL_PRESETS,
-  DEGREE_OPTIONS,
   NOTE_ORDER,
   buildBarContextFromForm,
   buildRecommendedDegreePool,
@@ -73,6 +74,9 @@ function App() {
   const selectedLickRef = useRef<GenerateLickResponse | null>(null)
   const isGeneratingRef = useRef<boolean>(false)
   const startPracticeCycleRef = useRef<(tempo: number) => void>(() => {})
+  const generateForBarRef = useRef<(targetBar: number) => void>(() => {})
+  const safeBarIndexRef = useRef<number>(0)
+  const barCountRef = useRef<number>(0)
 
   const selectedBluesForm = BLUES_FORM_MAP[bluesFormId]
   const isMajorBlues = selectedBluesForm.isMajorBlues
@@ -397,6 +401,14 @@ function App() {
     isGeneratingRef.current = isGenerating
   }, [isGenerating])
 
+  useEffect(() => {
+    safeBarIndexRef.current = safeBarIndex
+  }, [safeBarIndex])
+
+  useEffect(() => {
+    barCountRef.current = barCount
+  }, [barCount])
+
   const effectiveIncludeMajorNotes = isMajorBlues && includeMajorNotes
 
   const onBluesFormChange = (nextFormId: BluesFormId) => {
@@ -437,41 +449,48 @@ function App() {
     })
   }
 
-  const generateForBar = (targetBar: number) => {
-    const context = activeBars[targetBar] ?? buildBarContextFromForm(targetBar, activeKeyRoot, bluesFormId)
-    const degree = resolvePracticeDegreeFromLabel(context.degree)
-    const chord = context.chord_symbol
+  const generateForBar = useCallback(
+    (targetBar: number) => {
+      const context = activeBars[targetBar] ?? buildBarContextFromForm(targetBar, activeKeyRoot, bluesFormId)
+      const degree = resolvePracticeDegreeFromLabel(context.degree)
+      const chord = context.chord_symbol
 
-    setAudioError('')
-    const generated = createPermutationLick({
-      keyRoot: activeKeyRoot,
-      chordSymbol: chord,
-      degree,
-      flavor: effectiveIncludeMajorNotes ? 'major' : 'minor',
-      tempo: 76,
-      level: generatorLevel,
+      setAudioError('')
+      const generated = createPermutationLick({
+        keyRoot: activeKeyRoot,
+        chordSymbol: chord,
+        degree,
+        flavor: effectiveIncludeMajorNotes ? 'major' : 'minor',
+        tempo: 76,
+        level: generatorLevel,
+        enabledDegrees,
+        includeBend: allowBend && enabledDegrees.includes('b3'),
+      })
+      setGeneratedLickByBar((prev) => ({ ...prev, [targetBar]: generated }))
+      startPracticeCycleRef.current(generated.tempo)
+      void playLickOverChord({
+        tempo: generated.tempo,
+        chordMidi: resolveChordMidi(generated.chord),
+        notes: normalizeLickNotes(generated.notes),
+      }).catch((e) => {
+        setAudioError(e instanceof Error ? e.message : 'Failed to play generated lick')
+      })
+    },
+    [
+      activeBars,
+      activeKeyRoot,
+      allowBend,
+      bluesFormId,
+      effectiveIncludeMajorNotes,
       enabledDegrees,
-      includeBend: allowBend && enabledDegrees.includes('b3'),
-    })
-    setGeneratedLickByBar((prev) => ({ ...prev, [targetBar]: generated }))
-    startPracticeCycle(generated.tempo)
-    void playLickOverChord({
-      tempo: generated.tempo,
-      chordMidi: resolveChordMidi(generated.chord),
-      notes: normalizeLickNotes(generated.notes),
-    }).catch((e) => {
-      setAudioError(e instanceof Error ? e.message : 'Failed to play generated lick')
-    })
-  }
+      generatorLevel,
+    ],
+  )
 
   const goToNextBarAndGenerate = () => {
     const nextIndex = (safeBarIndex + 1) % Math.max(barCount, 1)
     setBarIndex(nextIndex)
     generateForBar(nextIndex)
-  }
-
-  const generateSelectedBar = () => {
-    generateForBar(safeBarIndex)
   }
 
   const replaySelectedBar = () => {
@@ -487,33 +506,67 @@ function App() {
     })
   }
 
+  const playSelectedBar = () => {
+    if (selectedLick) {
+      replaySelectedBar()
+      return
+    }
+    generateForBar(safeBarIndex)
+  }
+
+  useEffect(() => {
+    generateForBarRef.current = generateForBar
+  }, [generateForBar])
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.code !== 'Space') return
       const target = event.target as HTMLElement | null
       const tagName = target?.tagName
       if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || target?.isContentEditable) {
         return
       }
-      const lick = selectedLickRef.current
-      if (!lick || isGeneratingRef.current) return
-      event.preventDefault()
-      setAudioError('')
-      startPracticeCycleRef.current(lick.tempo)
-      void playLickOverChord({
-        tempo: lick.tempo,
-        chordMidi: resolveChordMidi(lick.chord),
-        notes: normalizeLickNotes(lick.notes),
-      }).catch((e) => {
-        setAudioError(e instanceof Error ? e.message : 'Failed to replay selected bar lick')
-      })
+
+      if (event.code === 'Space') {
+        if (isGeneratingRef.current) return
+        event.preventDefault()
+        const lick = selectedLickRef.current
+        if (lick) {
+          setAudioError('')
+          startPracticeCycleRef.current(lick.tempo)
+          void playLickOverChord({
+            tempo: lick.tempo,
+            chordMidi: resolveChordMidi(lick.chord),
+            notes: normalizeLickNotes(lick.notes),
+          }).catch((e) => {
+            setAudioError(e instanceof Error ? e.message : 'Failed to replay selected bar lick')
+          })
+          return
+        }
+        generateForBarRef.current(safeBarIndexRef.current)
+        return
+      }
+
+      if (event.code === 'ArrowRight') {
+        event.preventDefault()
+        const nextIndex = (safeBarIndexRef.current + 1) % Math.max(barCountRef.current, 1)
+        setBarIndex(nextIndex)
+        return
+      }
+
+      if (event.code === 'ArrowLeft') {
+        event.preventDefault()
+        const prevIndex =
+          (safeBarIndexRef.current - 1 + Math.max(barCountRef.current, 1)) % Math.max(barCountRef.current, 1)
+        setBarIndex(prevIndex)
+        return
+      }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [])
+  }, [setBarIndex])
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-8">
@@ -525,313 +578,69 @@ function App() {
       </div>
 
       <div className="grid items-stretch gap-4 lg:grid-cols-[1.8fr_1fr]">
-        <div className="space-y-4">
-          <Card className="space-y-3">
-            <CardTitle>Progression</CardTitle>
-            <p className="text-sm text-zinc-300">
-              Key <strong>{activeKeyRoot}</strong> - {selectedBluesForm.label}
-            </p>
-            <div className="grid grid-cols-1 gap-2 text-sm text-zinc-200 sm:grid-cols-3">
-              <p>
-                Current bar: <strong>{safeBarIndex + 1}</strong> / {barCount}
-              </p>
-              <p>
-                Current degree: <strong>{currentDegree}</strong>
-              </p>
-              <p>
-                Current chord: <strong>{currentChord}</strong>
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              {activeBars.map((bar) => {
-                const index = bar.bar_index
-                const isSelected = index === safeBarIndex
-                const hasLick = Boolean(lickByBar[index])
-                return (
-                  <button
-                    key={`${index}-${bar.id}`}
-                    type="button"
-                    onClick={() => setBarIndex(index)}
-                    className={`rounded-md border p-2 text-left text-xs transition ${
-                      isSelected
-                        ? 'border-blue-400 bg-blue-500/10 text-blue-100'
-                        : 'border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-zinc-500'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold">Bar {index + 1}</span>
-                      <span
-                        className={`h-2 w-2 rounded-full ${hasLick ? 'bg-emerald-400' : 'bg-zinc-600'}`}
-                      />
-                    </div>
-                    <div className="mt-1 text-zinc-400">
-                      {bar.degree} - {bar.chord_symbol}
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={goToNextBarAndGenerate} variant="primary" disabled={isGenerating}>
-                Hear Next
-              </Button>
-              <Button onClick={generateSelectedBar} disabled={isGenerating}>
-                Hear Selected Bar
-              </Button>
-              <Button onClick={replaySelectedBar} disabled={!selectedLick || isGenerating}>
-                Hear Again
-              </Button>
-              <span className="self-center text-xs text-zinc-400">
-                Tip: press <kbd className="rounded border border-zinc-700 px-1 py-0.5 text-[10px]">Space</kbd> to replay.
-              </span>
-            </div>
-            {!selectedLick ? (
-              <p className="text-xs text-zinc-500">No lick for this bar yet. Click Hear Selected Bar.</p>
-            ) : null}
-            {requestError ? <p className="text-sm text-red-400">{requestError}</p> : null}
-          </Card>
+        <div className="flex h-full flex-col gap-4">
+          <ProgressionCard
+            activeKeyRoot={activeKeyRoot}
+            selectedBluesFormLabel={selectedBluesForm.label}
+            safeBarIndex={safeBarIndex}
+            barCount={barCount}
+            currentDegree={currentDegree}
+            currentChord={currentChord}
+            activeBars={activeBars}
+            lickByBar={lickByBar}
+            onSelectBar={setBarIndex}
+            onPlay={playSelectedBar}
+            onHearNext={goToNextBarAndGenerate}
+            isGenerating={isGenerating}
+            hasSelectedLick={Boolean(selectedLick)}
+            requestError={requestError}
+          />
 
-          <Card className="space-y-3">
-            <CardTitle>Metronome + Turn</CardTitle>
-            <p className="text-xs text-zinc-400">
-              First bar is listen/playback, second bar is your turn to sing or play the phrase. Click track runs through both bars.
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button onClick={() => void enableMicrophone()} disabled={micStatus !== 'off'}>
-                {micStatus === 'off' ? 'Enable Mic Capture' : 'Mic Ready'}
-              </Button>
-              <Button onClick={() => void stopAndDisposeMicrophone()} disabled={micStatus === 'off'}>
-                Disable Mic
-              </Button>
-              <span className="text-xs text-zinc-400">
-                Mic status:{' '}
-                <strong className="text-zinc-200">
-                  {micStatus === 'capturing'
-                    ? 'capturing bends'
-                    : micStatus === 'ready'
-                      ? 'ready'
-                      : 'off'}
-                </strong>
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {[0, 1, 2, 3].map((beat) => {
-                const isActive = beat === activeBeat
-                return (
-                  <div
-                    key={beat}
-                    className={`flex h-10 w-10 items-center justify-center rounded-full border text-sm font-semibold ${
-                      isActive
-                        ? 'border-indigo-300 bg-indigo-500/25 text-indigo-100'
-                        : 'border-zinc-700 bg-zinc-900 text-zinc-400'
-                    }`}
-                  >
-                    {beat + 1}
-                  </div>
-                )
-              })}
-              <span className="ml-2 rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300">
-                {practicePhase === 'listen'
-                  ? 'Listen'
-                  : practicePhase === 'your-turn'
-                    ? 'Your turn'
-                    : 'Idle'}
-              </span>
-            </div>
-          </Card>
+          <div className="flex-1">
+            <MetronomeCard
+              micStatus={micStatus}
+              activeBeat={activeBeat}
+              practicePhase={practicePhase}
+              onEnableMic={() => void enableMicrophone()}
+              onDisableMic={() => void stopAndDisposeMicrophone()}
+            />
+          </div>
         </div>
 
         <div className="h-full">
-          <Card className="flex h-full flex-col space-y-3">
-            <CardTitle>Configuration</CardTitle>
-            <p className="text-xs text-zinc-400">Blues form + note pool controls for local permutation generation.</p>
-            <label className="flex flex-col gap-1 text-xs text-zinc-300">
-              <span className="font-medium text-zinc-200">Key</span>
-              <select
-                value={activeKeyRoot}
-                onChange={(event) => {
-                  setActiveKeyRoot(event.target.value as NoteName)
-                  setGeneratedLickByBar({})
-                  setBarIndex(0)
-                }}
-                className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
-              >
-                {NOTE_ORDER.map((note) => (
-                  <option key={note} value={note}>
-                    {note}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-zinc-300">
-              <span className="font-medium text-zinc-200">Blues Form</span>
-              <select
-                value={bluesFormId}
-                onChange={(event) => onBluesFormChange(event.target.value as BluesFormId)}
-                className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
-              >
-                {BLUES_FORM_OPTIONS.map((form) => (
-                  <option key={form.id} value={form.id}>
-                    {form.label}
-                  </option>
-                ))}
-              </select>
-              <span className="text-[11px] text-zinc-400">{selectedBluesForm.description}</span>
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-zinc-300">
-              <span className="font-medium text-zinc-200">Level</span>
-              <select
-                value={generatorLevel}
-                onChange={(event) => onGeneratorLevelChange(event.target.value as GeneratorLevelId)}
-                className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
-              >
-                <option value="level-1">Level 1: root-minor3-fifth</option>
-                <option value="level-2">Level 2: add 4 and b7</option>
-                <option value="level-3">Level 3: add b5 and 2-beat rhythm values</option>
-              </select>
-            </label>
-            <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
-              <input
-                type="checkbox"
-                checked={effectiveIncludeMajorNotes}
-                onChange={(event) => onIncludeMajorNotesChange(event.target.checked)}
-                disabled={!isMajorBlues}
-                className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
-              />
-              Add major-blues notes (2, 3, 6)
-            </label>
-            <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
-              <input
-                type="checkbox"
-                checked={allowBend}
-                onChange={(event) => setAllowBend(event.target.checked)}
-                className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
-              />
-              Include quarter bend on b3 (max one per bar)
-            </label>
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-zinc-200">Degree Pool (relative to song key)</p>
-              <div className="grid grid-cols-2 gap-2">
-                {DEGREE_OPTIONS.map((option) => {
-                  const isEnabled = enabledDegrees.includes(option.id)
-                  const isBlocked = !isMajorBlues && isMajorExtensionDegree(option.id)
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => toggleDegree(option.id)}
-                      disabled={isBlocked}
-                      className={`rounded-md border px-2 py-2 text-xs font-medium transition ${
-                        isEnabled
-                          ? 'border-sky-400 bg-sky-500/20 text-sky-100'
-                          : 'border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-500'
-                      } ${isBlocked ? 'cursor-not-allowed opacity-45' : ''}`}
-                    >
-                      {option.label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          </Card>
+          <ConfigurationCard
+            activeKeyRoot={activeKeyRoot}
+            onKeyChange={(nextKey) => {
+              setActiveKeyRoot(nextKey)
+              setGeneratedLickByBar({})
+              setBarIndex(0)
+            }}
+            bluesFormId={bluesFormId}
+            onBluesFormChange={onBluesFormChange}
+            selectedBluesFormDescription={selectedBluesForm.description}
+            generatorLevel={generatorLevel}
+            onGeneratorLevelChange={onGeneratorLevelChange}
+            effectiveIncludeMajorNotes={effectiveIncludeMajorNotes}
+            onIncludeMajorNotesChange={onIncludeMajorNotesChange}
+            isMajorBlues={isMajorBlues}
+            allowBend={allowBend}
+            onAllowBendChange={setAllowBend}
+            enabledDegrees={enabledDegrees}
+            isMajorExtensionDegree={isMajorExtensionDegree}
+            onToggleDegree={toggleDegree}
+            noteOrder={NOTE_ORDER}
+          />
         </div>
       </div>
+      <TimelineCard
+        score={score}
+        noteMatches={noteMatches}
+        targetPitchSegments={targetPitchSegments}
+        userPitchFeedbackPoints={userPitchFeedbackPoints}
+        pitchRange={pitchRange}
+      />
 
-      <Card className="space-y-3">
-        <CardTitle>Pitch Timeline (Time X / Pitch Y)</CardTitle>
-        <p className="text-xs text-zinc-400">
-          Blue contour shows target pitch. User points are green when correct, red when off target.
-        </p>
-        <p className="text-sm text-zinc-200">
-          Score:{' '}
-          <strong>
-            {score.matched}/{score.total} ({score.percentage}%)
-          </strong>
-          <span className="ml-2 text-xs text-zinc-400">
-            (forgiving mode: one close capture per note is enough)
-          </span>
-        </p>
-        {noteMatches.length > 0 ? (
-          <div className="flex flex-wrap gap-1 text-xs">
-            {noteMatches.map((isMatch, index) => (
-              <span
-                key={`note-hit-${index}`}
-                className={`rounded border px-2 py-1 ${
-                  isMatch
-                    ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-300'
-                    : 'border-rose-500/60 bg-rose-500/15 text-rose-300'
-                }`}
-              >
-                N{index + 1} {isMatch ? 'OK' : 'MISS'}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        <svg
-          viewBox="0 0 1000 240"
-          className="h-56 w-full rounded-lg border border-zinc-800 bg-zinc-950"
-          role="img"
-          aria-label="Pitch timeline"
-        >
-          {[0, 1, 2, 3, 4].map((beat) => (
-            <line
-              key={beat}
-              x1={beat * 250}
-              y1={0}
-              x2={beat * 250}
-              y2={240}
-              stroke="#27272a"
-              strokeWidth={1}
-            />
-          ))}
-
-          {targetPitchSegments.map((segment, segmentIndex) => {
-            const points = segment
-              .map((point) => {
-                const x = (point.time / 4) * 1000
-                const ratio =
-                  (point.midi - pitchRange.minMidi) / (pitchRange.maxMidi - pitchRange.minMidi || 1)
-                const y = 220 - ratio * 200
-                return `${x},${y}`
-              })
-              .join(' ')
-
-            return (
-              <polyline
-                key={`target-segment-${segmentIndex}`}
-                points={points}
-                fill="none"
-                stroke="#2563eb"
-                strokeWidth={2.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            )
-          })}
-
-          {userPitchFeedbackPoints.map((point, index) => {
-            const x = (point.time / 4) * 1000
-            const ratio = (point.midi - pitchRange.minMidi) / (pitchRange.maxMidi - pitchRange.minMidi || 1)
-            const y = 220 - ratio * 200
-            return (
-              <circle
-                key={`${point.time}-${index}`}
-                cx={x}
-                cy={y}
-                r={3}
-                fill={point.isCorrect ? '#34d399' : '#f43f5e'}
-              />
-            )
-          })}
-        </svg>
-      </Card>
-
-      <Card className="space-y-3">
-        <CardTitle>Selected Bar Lick</CardTitle>
-        <pre className="max-h-96 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-200">
-          {selectedLick ? JSON.stringify(selectedLick, null, 2) : 'No lick generated for this bar yet.'}
-        </pre>
-      </Card>
+      <SelectedLickCard selectedLick={selectedLick} />
     </main>
   )
 }

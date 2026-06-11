@@ -883,3 +883,60 @@ Copy this template for each chunk update:
   - CHUNK-CLEANUP-01B: split `App.tsx` UI sections into reusable components (`ProgressionCard`, `ConfigurationCard`, `MetronomeCard`, `TimelineCard`) to further reduce page complexity.
 - Risks/blockers:
   - No functional change intended; module boundaries are currently utility-focused and can be refined during component extraction.
+
+### 2026-06-12 01:22 - CHUNK-CLEANUP-01B-UI-COMPONENTS
+- Status: done
+- Completed:
+  - Split large page JSX in `App.tsx` into reusable practice UI components:
+    - `ProgressionCard`
+    - `ConfigurationCard`
+    - `MetronomeCard`
+    - `TimelineCard`
+    - `SelectedLickCard`
+  - Kept existing behavior and wiring while shifting layout rendering concerns out of the root page.
+  - Reduced `App.tsx` to orchestration/state logic + callbacks with significantly smaller render block.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `apps/frontend/src/features/practice/components/ProgressionCard.tsx`
+  - `apps/frontend/src/features/practice/components/ConfigurationCard.tsx`
+  - `apps/frontend/src/features/practice/components/MetronomeCard.tsx`
+  - `apps/frontend/src/features/practice/components/TimelineCard.tsx`
+  - `apps/frontend/src/features/practice/components/SelectedLickCard.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-CLEANUP-01C: extract mic/metronome/pitch-capture runtime logic into a dedicated hook (`usePracticeAudioCapture`) to shrink `App.tsx` further.
+- Risks/blockers:
+  - Component prop surfaces are intentionally explicit; minor prop grouping/refinement can happen in a follow-up cleanup pass.
+
+### 2026-06-12 01:24 - CHUNK-UX-GRID-LAYOUT-B
+- Status: done
+- Completed:
+  - Fixed left-column vertical stretch in the main two-column practice grid.
+  - Replaced the non-stretching `space-y-4` stack with a full-height flex column and moved spacing to `gap-4`.
+  - Wrapped `MetronomeCard` in a `flex-1` container and made the card itself `h-full` so it expands to consume available vertical space.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `apps/frontend/src/features/practice/components/MetronomeCard.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-CLEANUP-01C: extract mic/metronome/pitch-capture runtime logic into a dedicated hook (`usePracticeAudioCapture`) to shrink `App.tsx` further.
+- Risks/blockers:
+  - If `ProgressionCard` grows much taller in future, the metronome section may have limited remaining space on shorter screens.
+
+### 2026-06-12 01:27 - CHUNK-UX-CONTROLS-SHORTCUTS-A
+- Status: done
+- Completed:
+  - Simplified progression actions to two controls: `Play` (generate if needed, replay if available) and `Next`.
+  - Removed redundant `Hear Selected Bar` and `Hear Again` UI controls.
+  - Added keyboard shortcuts:
+    - `Space`: play/replay selected bar
+    - `ArrowRight` / `ArrowLeft`: move selection to next/previous bar
+  - Updated helper text and empty-state copy in progression card to match the new control model.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `apps/frontend/src/features/practice/components/ProgressionCard.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-CLEANUP-01C: extract mic/metronome/pitch-capture runtime logic into a dedicated hook (`usePracticeAudioCapture`) to shrink `App.tsx` further.
+- Risks/blockers:
+  - `ArrowLeft`/`ArrowRight` currently navigate selection only; if you want them to also trigger playback/generation, that can be added in a follow-up UX pass.
