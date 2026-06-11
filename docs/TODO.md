@@ -686,3 +686,77 @@ Copy this template for each chunk update:
   - CHUNK-DB-03-REPO-INTEGRATION: add backend endpoints/repository for reading forms and loading licks by form/bar/policy.
 - Risks/blockers:
   - Current seed generation uses existing `GenerateLickRequest` contract (`key="A"` literal in model); form-specific key semantics are currently represented by form/bar chord context.
+
+### 2026-06-11 17:18 - CHUNK-DB-RUN-MIGRATIONS-A
+- Status: done
+- Completed:
+  - Applied Supabase migrations via MCP:
+    - `001_init_minimal_schema`
+    - `002_seed_forms_eabc`
+    - `003_grant_service_role_privileges` (grants table privileges to `service_role`)
+  - Rebuilt backend container and ran lick seed script successfully with fallback generation mode for faster initialization.
+  - Verified Supabase row counts after run: `forms=4`, `form_bars=48`, `licks=145`.
+- Files changed:
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-DB-03-REPO-INTEGRATION: expose backend read endpoints for seeded forms/licks and wire frontend fetch.
+- Risks/blockers:
+  - Full LLM-based seeding with current model is slow; fallback-based seed is fast but lower musical variety.
+
+### 2026-06-11 18:31 - CHUNK-DB-03-REPO-INTEGRATION
+- Status: done
+- Completed:
+  - Added Supabase-backed repository module for library reads (`forms`, `form_bars`, `licks`).
+  - Added backend response models for form summaries, form bar context, and stored licks with embedded generated lick payload.
+  - Added new FastAPI endpoints:
+    - `GET /api/forms`
+    - `GET /api/forms/{form_id}/bars`
+    - `GET /api/licks` (filterable by `form_id`, `bar_index`, `note_policy`, plus `limit`)
+  - Wired defensive HTTP 500 error wrapping for data-access failures.
+- Files changed:
+  - `apps/backend/app/services/library_repo.py`
+  - `apps/backend/app/models.py`
+  - `apps/backend/app/main.py`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-DB-04-FRONTEND-LIBRARY-READ: regenerate frontend API client and integrate form/library fetch UI in practice flow.
+- Risks/blockers:
+  - `GeneratedLick` model currently fixes `key="A"` in schema; stored lick payload remains compatible now but broader key support will need model update later.
+
+### 2026-06-11 20:36 - CHUNK-DB-04-FRONTEND-LIBRARY-READ
+- Status: done
+- Completed:
+  - Regenerated frontend OpenAPI SDK to include new library endpoints (`/api/forms`, `/api/forms/{form_id}/bars`, `/api/licks`).
+  - Extended frontend API client wrappers to fetch forms, form bars, and stored licks.
+  - Integrated `React Query` library reads in `App.tsx`:
+    - loads active forms from Supabase-backed API
+    - loads bar grid for selected form
+    - loads library licks by selected form + stage note policy
+  - Added form selector UI and switched progression grid rendering to DB-provided form bars (with static fallback safety).
+  - Auto-hydrates per-bar lick cache from fetched library rows while preserving existing playback/practice UX.
+- Files changed:
+  - `apps/frontend/src/api/generated/index.ts`
+  - `apps/frontend/src/api/generated/sdk.gen.ts`
+  - `apps/frontend/src/api/generated/types.gen.ts`
+  - `apps/frontend/src/api/client.ts`
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-DB-05-FRONTEND-FLOW-POLISH: simplify controls to emphasize DB library practice flow (load/replay/next) and reduce generation-only bias.
+- Risks/blockers:
+  - `GenerateLickRequest` is still constrained to key `A` in backend model, so generation semantics are not yet fully key-aware even when form roots differ.
+
+### 2026-06-11 17:16 - CHUNK-DB-KEY-COMPAT-A
+- Status: done
+- Completed:
+  - Updated backend Supabase client env resolution to prefer `SUPABASE_API_KEY` and keep legacy fallbacks (`SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_KEY`).
+  - Updated backend env template and README Supabase section to reflect modern key naming.
+- Files changed:
+  - `apps/backend/app/services/supabase_client.py`
+  - `apps/backend/.env.example`
+  - `README.md`
+  - `docs/TODO.md`
+- Next best step:
+  - Rebuild backend and rerun lick seed script using new `SUPABASE_API_KEY` env value.
+- Risks/blockers:
+  - If provided Supabase API key lacks required privileges, writes may still fail despite successful client auth.

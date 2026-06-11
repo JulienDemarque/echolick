@@ -23,6 +23,82 @@ export type Bend = {
 };
 
 /**
+ * FormBarContext
+ */
+export type FormBarContext = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Form Id
+     */
+    form_id: string;
+    /**
+     * Bar Index
+     */
+    bar_index: number;
+    /**
+     * Degree
+     */
+    degree: string;
+    /**
+     * Chord Symbol
+     */
+    chord_symbol: string;
+    /**
+     * Chord Root
+     */
+    chord_root?: string | null;
+    /**
+     * Created At
+     */
+    created_at: string;
+};
+
+/**
+ * FormSummary
+ */
+export type FormSummary = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Slug
+     */
+    slug: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Key Root
+     */
+    key_root: string;
+    /**
+     * Bar Count
+     */
+    bar_count: number;
+    /**
+     * Time Signature
+     */
+    time_signature: string;
+    /**
+     * Description
+     */
+    description?: string | null;
+    /**
+     * Is Active
+     */
+    is_active: boolean;
+    /**
+     * Created At
+     */
+    created_at: string;
+};
+
+/**
  * GenerateChorusRequest
  */
 export type GenerateChorusRequest = {
@@ -178,6 +254,49 @@ export type LickNote = {
 };
 
 /**
+ * StoredLick
+ */
+export type StoredLick = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Form Id
+     */
+    form_id: string;
+    /**
+     * Bar Index
+     */
+    bar_index: number;
+    /**
+     * Note Policy
+     */
+    note_policy: string;
+    /**
+     * Source
+     */
+    source: string;
+    /**
+     * Tempo
+     */
+    tempo: number;
+    /**
+     * Difficulty Level
+     */
+    difficulty_level?: number | null;
+    /**
+     * Is Active
+     */
+    is_active: boolean;
+    /**
+     * Created At
+     */
+    created_at: string;
+    generated: GeneratedLick;
+};
+
+/**
  * ValidationError
  */
 export type ValidationError = {
@@ -282,3 +401,97 @@ export type GenerateChorusRouteApiGenerateChorusPostResponses = {
 };
 
 export type GenerateChorusRouteApiGenerateChorusPostResponse = GenerateChorusRouteApiGenerateChorusPostResponses[keyof GenerateChorusRouteApiGenerateChorusPostResponses];
+
+export type ListFormsRouteApiFormsGetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/forms';
+};
+
+export type ListFormsRouteApiFormsGetResponses = {
+    /**
+     * Response List Forms Route Api Forms Get
+     *
+     * Successful Response
+     */
+    200: Array<FormSummary>;
+};
+
+export type ListFormsRouteApiFormsGetResponse = ListFormsRouteApiFormsGetResponses[keyof ListFormsRouteApiFormsGetResponses];
+
+export type ListFormBarsRouteApiFormsFormIdBarsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Form Id
+         */
+        form_id: string;
+    };
+    query?: never;
+    url: '/api/forms/{form_id}/bars';
+};
+
+export type ListFormBarsRouteApiFormsFormIdBarsGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ListFormBarsRouteApiFormsFormIdBarsGetError = ListFormBarsRouteApiFormsFormIdBarsGetErrors[keyof ListFormBarsRouteApiFormsFormIdBarsGetErrors];
+
+export type ListFormBarsRouteApiFormsFormIdBarsGetResponses = {
+    /**
+     * Response List Form Bars Route Api Forms  Form Id  Bars Get
+     *
+     * Successful Response
+     */
+    200: Array<FormBarContext>;
+};
+
+export type ListFormBarsRouteApiFormsFormIdBarsGetResponse = ListFormBarsRouteApiFormsFormIdBarsGetResponses[keyof ListFormBarsRouteApiFormsFormIdBarsGetResponses];
+
+export type ListLicksRouteApiLicksGetData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Form Id
+         */
+        form_id?: string | null;
+        /**
+         * Bar Index
+         */
+        bar_index?: number | null;
+        /**
+         * Note Policy
+         */
+        note_policy?: string | null;
+        /**
+         * Limit
+         */
+        limit?: number;
+    };
+    url: '/api/licks';
+};
+
+export type ListLicksRouteApiLicksGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ListLicksRouteApiLicksGetError = ListLicksRouteApiLicksGetErrors[keyof ListLicksRouteApiLicksGetErrors];
+
+export type ListLicksRouteApiLicksGetResponses = {
+    /**
+     * Response List Licks Route Api Licks Get
+     *
+     * Successful Response
+     */
+    200: Array<StoredLick>;
+};
+
+export type ListLicksRouteApiLicksGetResponse = ListLicksRouteApiLicksGetResponses[keyof ListLicksRouteApiLicksGetResponses];

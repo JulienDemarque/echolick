@@ -1,22 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
+  fetchFormBars,
+  fetchForms,
+  fetchLicks,
   postGenerateChorus,
   postGenerateLick,
+  type FormBarResponse,
+  type FormSummaryResponse,
   type GenerateChorusRequest,
   type GenerateLickRequest,
   type GenerateLickResponse,
+  type StoredLickResponse,
 } from './api/client'
 import { playLickOverChord } from './audio/bluesPrototype'
 import { Button } from './components/ui/button'
 import { Card, CardTitle } from './components/ui/card'
-import {
-  BLUES_PROGRESSION,
-  CHORD_MIDI_BY_DEGREE,
-  CHORDS_BY_DEGREE,
-  advanceBar,
-  getCurrentDegree,
-} from './music/progression'
+import { BLUES_PROGRESSION, CHORD_MIDI_BY_DEGREE, CHORDS_BY_DEGREE } from './music/progression'
 import { useAppStore } from './store/useAppStore'
 import type { LickNote } from './types/music'
 
@@ -52,6 +52,7 @@ type UserPitchFeedbackPoint = PitchPoint & {
   isCorrect: boolean
 }
 type PracticeStageId = 'starter' | 'bends' | 'mixed'
+type NotePolicy = 'major_penta_root' | 'minor_penta_root' | 'mix_major_minor' | 'chord_tones_plus_passing'
 
 const TARGET_CONTOUR_STEP_BEATS = 0.03
 const SCORE_TIME_TOLERANCE_BEATS = 0.4
@@ -81,6 +82,24 @@ const PRACTICE_STAGES: Array<{
   },
 ]
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+const STAGE_NOTE_POLICY: Record<PracticeStageId, NotePolicy> = {
+  starter: 'major_penta_root',
+  bends: 'mix_major_minor',
+  mixed: 'mix_major_minor',
+}
+
+const buildFallbackBarContext = (index: number): FormBarResponse => {
+  const degree = BLUES_PROGRESSION[index] ?? 'I'
+  return {
+    id: `fallback-${index}`,
+    form_id: 'fallback',
+    bar_index: index,
+    degree,
+    chord_symbol: CHORDS_BY_DEGREE[degree] ?? CHORDS_BY_DEGREE.I,
+    chord_root: 'A',
+    created_at: new Date(0).toISOString(),
+  }
+}
 
 const frequencyToMidi = (frequencyHz: number): number => 69 + 12 * Math.log2(frequencyHz / 440)
 
@@ -249,7 +268,8 @@ function App() {
   const setBarIndex = useAppStore((state) => state.setBarIndex)
 
   const [audioError, setAudioError] = useState<string>('')
-  const [lickByBar, setLickByBar] = useState<Record<number, GenerateLickResponse>>({})
+  const [generatedLickByBar, setGeneratedLickByBar] = useState<Record<number, GenerateLickResponse>>({})
+  const [selectedFormId, setSelectedFormId] = useState<string | null>(null)
   const [activeBeat, setActiveBeat] = useState<number | null>(null)
   const [practicePhase, setPracticePhase] = useState<PracticePhase>('idle')
   const [practiceStage, setPracticeStage] = useState<PracticeStageId>('starter')
@@ -267,11 +287,60 @@ function App() {
   const smoothedMidiRef = useRef<number | null>(null)
   const pitchCaptureRafRef = useRef<number | null>(null)
   const metronomeAudioContextRef = useRef<AudioContext | null>(null)
+  const selectedLickRef = useRef<GenerateLickResponse | null>(null)
+  const isGeneratingRef = useRef<boolean>(false)
+  const startPracticeCycleRef = useRef<(tempo: number) => void>(() => {})
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-  const currentDegree = getCurrentDegree(barIndex)
-  const currentChord = CHORDS_BY_DEGREE[currentDegree]
-  const selectedLick = lickByBar[barIndex] ?? null
+  const formsQuery = useQuery({
+    queryKey: ['forms', apiBaseUrl],
+    queryFn: () => fetchForms(apiBaseUrl),
+  })
+  const activeForm = useMemo<FormSummaryResponse | null>(
+    () => {
+      const forms = formsQuery.data ?? []
+      return forms.find((form) => form.id === selectedFormId) ?? forms[0] ?? null
+    },
+    [formsQuery.data, selectedFormId],
+  )
+  const formBarsQuery = useQuery({
+    queryKey: ['form-bars', apiBaseUrl, activeForm?.id],
+    queryFn: () => fetchFormBars(apiBaseUrl, activeForm!.id),
+    enabled: Boolean(activeForm?.id),
+  })
+  const dbBars = formBarsQuery.data ?? []
+  const activeBars = dbBars.length > 0 ? dbBars : BLUES_PROGRESSION.map((_, index) => buildFallbackBarContext(index))
+  const barCount = activeBars.length
+  const safeBarIndex = Math.min(barIndex, Math.max(0, barCount - 1))
+  const currentBarContext = activeBars[safeBarIndex] ?? buildFallbackBarContext(0)
+  const currentDegree = currentBarContext.degree
+  const currentChord = currentBarContext.chord_symbol
+  const selectedNotePolicy = STAGE_NOTE_POLICY[practiceStage]
+  const libraryLicksQuery = useQuery({
+    queryKey: ['library-licks', apiBaseUrl, activeForm?.id, selectedNotePolicy],
+    queryFn: () =>
+      fetchLicks(apiBaseUrl, {
+        formId: activeForm!.id,
+        notePolicy: selectedNotePolicy,
+        limit: 200,
+      }),
+    enabled: Boolean(activeForm?.id),
+  })
+  const libraryLickByBar = useMemo<Record<number, GenerateLickResponse>>(() => {
+    const rows = (libraryLicksQuery.data ?? []) as StoredLickResponse[]
+    const nextByBar: Record<number, GenerateLickResponse> = {}
+    rows.forEach((row) => {
+      if (nextByBar[row.bar_index] === undefined) {
+        nextByBar[row.bar_index] = applyPracticeStageToLick(row.generated, practiceStage)
+      }
+    })
+    return nextByBar
+  }, [libraryLicksQuery.data, practiceStage])
+  const lickByBar = useMemo(
+    () => ({ ...libraryLickByBar, ...generatedLickByBar }),
+    [libraryLickByBar, generatedLickByBar],
+  )
+  const selectedLick = lickByBar[safeBarIndex] ?? null
   const selectedPracticeStage = PRACTICE_STAGES.find((stage) => stage.id === practiceStage) ?? PRACTICE_STAGES[0]
   const selectedLickNotes = useMemo(
     () => (selectedLick ? normalizeLickNotes(selectedLick.notes) : []),
@@ -281,6 +350,13 @@ function App() {
     () => buildTargetPitchSegments(selectedLickNotes, selectedLick?.tempo ?? 76),
     [selectedLick?.tempo, selectedLickNotes],
   )
+
+  useEffect(() => {
+    if (barIndex !== safeBarIndex) {
+      setBarIndex(safeBarIndex)
+    }
+  }, [barIndex, safeBarIndex, setBarIndex])
+
   const flattenedTargetContour = useMemo(() => targetPitchSegments.flat(), [targetPitchSegments])
   const noteMatches = useMemo(() => {
     if (selectedLickNotes.length === 0) return []
@@ -521,6 +597,9 @@ function App() {
     }, PLAYBACK_START_DELAY_MS + totalBeats * beatMs)
     metronomeTimeoutsRef.current.push(doneId)
   }
+  useEffect(() => {
+    startPracticeCycleRef.current = startPracticeCycle
+  })
 
   useEffect(
     () => () => {
@@ -570,7 +649,7 @@ function App() {
       data.bars.forEach((bar, index) => {
         nextByBar[index] = applyPracticeStageToLick(bar, practiceStage)
       })
-      setLickByBar(nextByBar)
+      setGeneratedLickByBar(nextByBar)
       setAudioError('')
     },
   })
@@ -580,7 +659,7 @@ function App() {
       postGenerateLick(apiBaseUrl, payload),
     onSuccess: (data, variables) => {
       const stagedLick = applyPracticeStageToLick(data, practiceStage)
-      setLickByBar((prev) => ({ ...prev, [variables.bar]: stagedLick }))
+      setGeneratedLickByBar((prev) => ({ ...prev, [variables.bar]: stagedLick }))
       startPracticeCycle(stagedLick.tempo)
       void playLickOverChord({
         tempo: stagedLick.tempo,
@@ -593,15 +672,27 @@ function App() {
   })
 
   const requestError =
+    (formsQuery.error as Error | null)?.message ||
+    (formBarsQuery.error as Error | null)?.message ||
+    (libraryLicksQuery.error as Error | null)?.message ||
     (chorusMutation.error as Error | null)?.message ||
     (generateMutation.error as Error | null)?.message ||
     micError ||
     audioError
   const isGenerating = generateMutation.isPending || chorusMutation.isPending
 
+  useEffect(() => {
+    selectedLickRef.current = selectedLick
+  }, [selectedLick])
+
+  useEffect(() => {
+    isGeneratingRef.current = isGenerating
+  }, [isGenerating])
+
   const generateForBar = (targetBar: number) => {
-    const degree = getCurrentDegree(targetBar)
-    const chord = CHORDS_BY_DEGREE[degree]
+    const context = activeBars[targetBar] ?? buildFallbackBarContext(targetBar)
+    const degree = context.degree as GenerateLickRequest['degree']
+    const chord = context.chord_symbol
 
     const flavor: 'major' | 'minor' =
       practiceStage === 'mixed' ? (Math.random() < 0.5 ? 'major' : 'minor') : 'major'
@@ -621,7 +712,7 @@ function App() {
   }
 
   const goToNextBarAndGenerate = () => {
-    const nextIndex = advanceBar(barIndex)
+    const nextIndex = (safeBarIndex + 1) % Math.max(barCount, 1)
     setBarIndex(nextIndex)
     generateForBar(nextIndex)
   }
@@ -641,7 +732,7 @@ function App() {
     generateForBar(barIndex)
   }
 
-  const replaySelectedBar = useCallback(() => {
+  const replaySelectedBar = () => {
     if (!selectedLick) return
     setAudioError('')
     startPracticeCycle(selectedLick.tempo)
@@ -652,7 +743,7 @@ function App() {
     }).catch((e) => {
       setAudioError(e instanceof Error ? e.message : 'Failed to replay selected bar lick')
     })
-  }, [selectedLick, startPracticeCycle])
+  }
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -662,16 +753,25 @@ function App() {
       if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || target?.isContentEditable) {
         return
       }
-      if (!selectedLick || isGenerating) return
+      const lick = selectedLickRef.current
+      if (!lick || isGeneratingRef.current) return
       event.preventDefault()
-      replaySelectedBar()
+      setAudioError('')
+      startPracticeCycleRef.current(lick.tempo)
+      void playLickOverChord({
+        tempo: lick.tempo,
+        chordMidi: resolveChordMidi(lick.degree),
+        notes: normalizeLickNotes(lick.notes),
+      }).catch((e) => {
+        setAudioError(e instanceof Error ? e.message : 'Failed to replay selected bar lick')
+      })
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [isGenerating, replaySelectedBar, selectedLick])
+  }, [])
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-8">
@@ -685,11 +785,13 @@ function App() {
       <Card className="space-y-3">
         <CardTitle>Progression</CardTitle>
         <p className="text-sm text-zinc-300">
-          12-bar form: I IV I I IV IV I I V IV I V
+          {activeForm
+            ? `${activeForm.name} (${activeForm.key_root}, ${activeForm.time_signature})`
+            : 'Loading form...'}
         </p>
         <div className="grid grid-cols-1 gap-2 text-sm text-zinc-200 sm:grid-cols-3">
           <p>
-            Current bar: <strong>{barIndex + 1}</strong> / 12
+            Current bar: <strong>{safeBarIndex + 1}</strong> / {barCount}
           </p>
           <p>
             Current degree: <strong>{currentDegree}</strong>
@@ -699,13 +801,13 @@ function App() {
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-          {BLUES_PROGRESSION.map((degree, index) => {
-            const chord = CHORDS_BY_DEGREE[degree]
-            const isSelected = index === barIndex
+          {activeBars.map((bar) => {
+            const index = bar.bar_index
+            const isSelected = index === safeBarIndex
             const hasLick = Boolean(lickByBar[index])
             return (
               <button
-                key={`${index}-${degree}`}
+                key={`${index}-${bar.id}`}
                 type="button"
                 onClick={() => setBarIndex(index)}
                 className={`rounded-md border p-2 text-left text-xs transition ${
@@ -721,11 +823,32 @@ function App() {
                   />
                 </div>
                 <div className="mt-1 text-zinc-400">
-                  {degree} - {chord}
+                  {bar.degree} - {bar.chord_symbol}
                 </div>
               </button>
             )
           })}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <label className="flex min-w-64 flex-col gap-1 text-xs text-zinc-300">
+            <span className="font-medium text-zinc-200">Form</span>
+            <select
+              value={activeForm?.id ?? ''}
+              onChange={(event) => {
+                setSelectedFormId(event.target.value)
+                setBarIndex(0)
+                setGeneratedLickByBar({})
+              }}
+              className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
+            >
+              {(formsQuery.data ?? []).map((form) => (
+                <option key={form.id} value={form.id}>
+                  {form.name}
+                </option>
+              ))}
+            </select>
+            <span className="text-[11px] text-zinc-400">Source: Supabase form library</span>
+          </label>
         </div>
         <div className="flex flex-wrap gap-2">
           <label className="flex min-w-64 flex-col gap-1 text-xs text-zinc-300">
@@ -741,7 +864,9 @@ function App() {
                 </option>
               ))}
             </select>
-            <span className="text-[11px] text-zinc-400">{selectedPracticeStage.description}</span>
+            <span className="text-[11px] text-zinc-400">
+              {selectedPracticeStage.description} (policy: {selectedNotePolicy})
+            </span>
           </label>
         </div>
         <div className="flex flex-wrap gap-2">

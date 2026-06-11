@@ -67,12 +67,12 @@ Notes:
 When wiring persistence, set these env vars:
 
 - `SUPABASE_URL`
+- `SUPABASE_API_KEY` (recommended; modern secret key)
 - `SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
 
 Notes:
 
-- Keep `SUPABASE_SERVICE_ROLE_KEY` backend-only.
+- Keep `SUPABASE_API_KEY` backend-only.
 - Prefer backend-mediated writes for now; frontend can remain API-driven.
 
 ### Run initial schema + form seed

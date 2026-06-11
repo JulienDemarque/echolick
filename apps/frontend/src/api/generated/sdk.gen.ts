@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { GenerateChorusRouteApiGenerateChorusPostData, GenerateChorusRouteApiGenerateChorusPostErrors, GenerateChorusRouteApiGenerateChorusPostResponses, GenerateLickRouteApiGenerateLickPostData, GenerateLickRouteApiGenerateLickPostErrors, GenerateLickRouteApiGenerateLickPostResponses, HealthcheckHealthGetData, HealthcheckHealthGetResponses } from './types.gen';
+import type { GenerateChorusRouteApiGenerateChorusPostData, GenerateChorusRouteApiGenerateChorusPostErrors, GenerateChorusRouteApiGenerateChorusPostResponses, GenerateLickRouteApiGenerateLickPostData, GenerateLickRouteApiGenerateLickPostErrors, GenerateLickRouteApiGenerateLickPostResponses, HealthcheckHealthGetData, HealthcheckHealthGetResponses, ListFormBarsRouteApiFormsFormIdBarsGetData, ListFormBarsRouteApiFormsFormIdBarsGetErrors, ListFormBarsRouteApiFormsFormIdBarsGetResponses, ListFormsRouteApiFormsGetData, ListFormsRouteApiFormsGetResponses, ListLicksRouteApiLicksGetData, ListLicksRouteApiLicksGetErrors, ListLicksRouteApiLicksGetResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -46,3 +46,18 @@ export const generateChorusRouteApiGenerateChorusPost = <ThrowOnError extends bo
         ...options.headers
     }
 });
+
+/**
+ * List Forms Route
+ */
+export const listFormsRouteApiFormsGet = <ThrowOnError extends boolean = false>(options?: Options<ListFormsRouteApiFormsGetData, ThrowOnError>) => (options?.client ?? client).get<ListFormsRouteApiFormsGetResponses, unknown, ThrowOnError>({ url: '/api/forms', ...options });
+
+/**
+ * List Form Bars Route
+ */
+export const listFormBarsRouteApiFormsFormIdBarsGet = <ThrowOnError extends boolean = false>(options: Options<ListFormBarsRouteApiFormsFormIdBarsGetData, ThrowOnError>) => (options.client ?? client).get<ListFormBarsRouteApiFormsFormIdBarsGetResponses, ListFormBarsRouteApiFormsFormIdBarsGetErrors, ThrowOnError>({ url: '/api/forms/{form_id}/bars', ...options });
+
+/**
+ * List Licks Route
+ */
+export const listLicksRouteApiLicksGet = <ThrowOnError extends boolean = false>(options?: Options<ListLicksRouteApiLicksGetData, ThrowOnError>) => (options?.client ?? client).get<ListLicksRouteApiLicksGetResponses, ListLicksRouteApiLicksGetErrors, ThrowOnError>({ url: '/api/licks', ...options });

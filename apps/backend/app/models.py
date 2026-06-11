@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -66,3 +67,38 @@ class GeneratedChorus(BaseModel):
     flavor: BluesFlavor
     tempo: int = Field(ge=40, le=220)
     bars: list[GeneratedLick] = Field(min_length=12, max_length=12)
+
+
+class FormSummary(BaseModel):
+    id: str
+    slug: str
+    name: str
+    key_root: str
+    bar_count: int
+    time_signature: str
+    description: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+
+
+class FormBarContext(BaseModel):
+    id: str
+    form_id: str
+    bar_index: int
+    degree: str
+    chord_symbol: str
+    chord_root: Optional[str] = None
+    created_at: datetime
+
+
+class StoredLick(BaseModel):
+    id: str
+    form_id: str
+    bar_index: int
+    note_policy: str
+    source: str
+    tempo: int
+    difficulty_level: Optional[int] = None
+    is_active: bool
+    created_at: datetime
+    generated: GeneratedLick
