@@ -18,7 +18,28 @@ from app.services.prompt import build_chorus_generation_prompt, build_generation
 logger = logging.getLogger(__name__)
 langfuse = get_client()
 BLUES_PROGRESSION = ["I", "IV", "I", "I", "IV", "IV", "I", "I", "V", "IV", "I", "V"]
-CHORD_BY_DEGREE = {"I": "A7", "IV": "D7", "V": "E7"}
+NOTE_ORDER = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+NOTE_INDEX = {note: index for index, note in enumerate(NOTE_ORDER)}
+ALLOWED_DURATIONS = {0.5, 1.0, 2.0}
+
+
+def _build_chord_map_for_key(key: str) -> dict[str, str]:
+    root_index = NOTE_INDEX.get(key)
+    if root_index is None:
+        root_index = NOTE_INDEX["A"]
+
+    fourth_index = (root_index + 5) % 12
+    fifth_index = (root_index + 7) % 12
+
+    return {
+        "I": f"{NOTE_ORDER[root_index]}7",
+        "IV": f"{NOTE_ORDER[fourth_index]}7",
+        "V": f"{NOTE_ORDER[fifth_index]}7",
+    }
+
+
+def _is_half_beat_grid(value: float) -> bool:
+    return abs((value * 2) - round(value * 2)) < 1e-6
 
 
 def _to_openai_strict_json_schema(node: object) -> object:
@@ -43,6 +64,10 @@ def _validate_generated_lick(lick: GeneratedLick) -> None:
     vibrato_count = 0
 
     for note in lick.notes:
+        if not _is_half_beat_grid(note.start):
+            raise ValueError("note start must align to 0.5 beat grid")
+        if note.duration not in ALLOWED_DURATIONS:
+            raise ValueError("note duration must be one of 0.5, 1.0, or 2.0 beats")
         if note.start + note.duration > 4:
             raise ValueError("note ends after beat 4")
 
@@ -155,6 +180,7 @@ def _build_chorus_trace_output(
 
 
 def _build_fallback_chorus(payload: GenerateChorusRequest) -> GeneratedChorus:
+    chord_by_degree = _build_chord_map_for_key(payload.key)
     bars: list[GeneratedLick] = []
     for degree in BLUES_PROGRESSION:
         bars.append(
@@ -162,7 +188,7 @@ def _build_fallback_chorus(payload: GenerateChorusRequest) -> GeneratedChorus:
                 GenerateLickRequest(
                     key=payload.key,
                     degree=degree,
-                    chord=CHORD_BY_DEGREE[degree],
+                    chord=chord_by_degree[degree],
                     flavor=payload.flavor,
                     tempo=payload.tempo,
                 )
@@ -178,12 +204,13 @@ def _build_fallback_chorus(payload: GenerateChorusRequest) -> GeneratedChorus:
 
 
 def _validate_generated_chorus(chorus: GeneratedChorus) -> None:
+    chord_by_degree = _build_chord_map_for_key(chorus.key)
     if len(chorus.bars) != 12:
         raise ValueError("chorus must contain exactly 12 bars")
 
     for index, expected_degree in enumerate(BLUES_PROGRESSION):
         bar = chorus.bars[index]
-        expected_chord = CHORD_BY_DEGREE[expected_degree]
+        expected_chord = chord_by_degree[expected_degree]
 
         if bar.degree != expected_degree:
             raise ValueError(f"bar {index + 1} degree mismatch: expected {expected_degree}")

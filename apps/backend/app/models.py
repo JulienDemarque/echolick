@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 Degree = Literal["I", "IV", "V"]
 BluesFlavor = Literal["minor", "major"]
+KeyRoot = Literal["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
 
 class Bend(BaseModel):
@@ -39,7 +40,7 @@ class LickNote(BaseModel):
 
 
 class GenerateLickRequest(BaseModel):
-    key: Literal["A"] = "A"
+    key: KeyRoot = "A"
     degree: Degree
     chord: str
     flavor: BluesFlavor
@@ -47,13 +48,13 @@ class GenerateLickRequest(BaseModel):
 
 
 class GenerateChorusRequest(BaseModel):
-    key: Literal["A"] = "A"
+    key: KeyRoot = "A"
     flavor: BluesFlavor
     tempo: int = Field(ge=40, le=220)
 
 
 class GeneratedLick(BaseModel):
-    key: Literal["A"] = "A"
+    key: KeyRoot = "A"
     degree: Degree
     chord: str
     flavor: BluesFlavor
@@ -63,7 +64,7 @@ class GeneratedLick(BaseModel):
 
 
 class GeneratedChorus(BaseModel):
-    key: Literal["A"] = "A"
+    key: KeyRoot = "A"
     flavor: BluesFlavor
     tempo: int = Field(ge=40, le=220)
     bars: list[GeneratedLick] = Field(min_length=12, max_length=12)

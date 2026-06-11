@@ -1,266 +1,45 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
-import {
-  fetchFormBars,
-  fetchForms,
-  fetchLicks,
-  postGenerateChorus,
-  postGenerateLick,
-  type FormBarResponse,
-  type FormSummaryResponse,
-  type GenerateChorusRequest,
-  type GenerateLickRequest,
-  type GenerateLickResponse,
-  type StoredLickResponse,
-} from './api/client'
+import { type GenerateLickResponse } from './api/client'
 import { playLickOverChord } from './audio/bluesPrototype'
 import { Button } from './components/ui/button'
 import { Card, CardTitle } from './components/ui/card'
-import { BLUES_PROGRESSION, CHORD_MIDI_BY_DEGREE, CHORDS_BY_DEGREE } from './music/progression'
+import {
+  BLUES_FORM_MAP,
+  BLUES_FORM_OPTIONS,
+  DEGREE_LEVEL_PRESETS,
+  DEGREE_OPTIONS,
+  NOTE_ORDER,
+  buildBarContextFromForm,
+  buildRecommendedDegreePool,
+  createPermutationLick,
+  isMajorExtensionDegree,
+  normalizeLickNotes,
+  resolveChordMidi,
+  resolvePracticeDegreeFromLabel,
+  type BluesFormId,
+  type DegreeOptionId,
+  type GeneratorLevelId,
+  type NoteName,
+} from './features/practice/musicGenerator'
+import {
+  MAX_CAPTURE_BEATS,
+  SCORE_PITCH_TOLERANCE_SEMITONES,
+  SCORE_TIME_TOLERANCE_BEATS,
+  buildTargetPitchSegments,
+  detectPitchHz,
+  frequencyToMidi,
+  getClosestContourMidi,
+  type PitchPoint,
+} from './features/practice/pitchUtils'
 import { useAppStore } from './store/useAppStore'
-import type { LickNote } from './types/music'
-
-const normalizeLickNotes = (notes: GenerateLickResponse['notes']): LickNote[] =>
-  notes.map((note) => ({
-    ...note,
-    bend: note.bend ?? undefined,
-    vibrato: note.vibrato ?? undefined,
-  }))
-
-const resolveChordMidi = (degree: string): number[] => {
-  if (degree === 'I' || degree === 'IV' || degree === 'V') {
-    return CHORD_MIDI_BY_DEGREE[degree]
-  }
-  return CHORD_MIDI_BY_DEGREE.I
-}
 
 type PracticePhase = 'idle' | 'listen' | 'your-turn'
 
-type PitchPoint = {
-  time: number
-  midi: number
-}
-
 const PLAYBACK_START_DELAY_MS = 60
-const MIN_PITCH_HZ = 70
-const MAX_PITCH_HZ = 1000
-const MAX_CAPTURE_BEATS = 4
 
 type MicStatus = 'off' | 'ready' | 'capturing'
-type PitchSegment = PitchPoint[]
 type UserPitchFeedbackPoint = PitchPoint & {
   isCorrect: boolean
-}
-type PracticeStageId = 'starter' | 'bends' | 'mixed'
-type NotePolicy = 'major_penta_root' | 'minor_penta_root' | 'mix_major_minor' | 'chord_tones_plus_passing'
-
-const TARGET_CONTOUR_STEP_BEATS = 0.03
-const SCORE_TIME_TOLERANCE_BEATS = 0.4
-const SCORE_PITCH_TOLERANCE_SEMITONES = 1.8
-const STARTER_MAX_NOTES = 4
-const STARTER_TARGET_INTERVALS = [0, 2, 4]
-
-const PRACTICE_STAGES: Array<{
-  id: PracticeStageId
-  label: string
-  description: string
-}> = [
-  {
-    id: 'starter',
-    label: 'Starter: 4 notes on 1-2-3',
-    description: 'Uses 4 notes snapped to 3 target tones. No bends/vibrato.',
-  },
-  {
-    id: 'bends',
-    label: 'Stage 2: add bends',
-    description: 'Full generated phrase with bends/vibrato, still single flavor.',
-  },
-  {
-    id: 'mixed',
-    label: 'Stage 3: mix major/minor',
-    description: 'Full phrase, and each generate can switch between major and minor flavor.',
-  },
-]
-const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-const STAGE_NOTE_POLICY: Record<PracticeStageId, NotePolicy> = {
-  starter: 'major_penta_root',
-  bends: 'mix_major_minor',
-  mixed: 'mix_major_minor',
-}
-
-const buildFallbackBarContext = (index: number): FormBarResponse => {
-  const degree = BLUES_PROGRESSION[index] ?? 'I'
-  return {
-    id: `fallback-${index}`,
-    form_id: 'fallback',
-    bar_index: index,
-    degree,
-    chord_symbol: CHORDS_BY_DEGREE[degree] ?? CHORDS_BY_DEGREE.I,
-    chord_root: 'A',
-    created_at: new Date(0).toISOString(),
-  }
-}
-
-const frequencyToMidi = (frequencyHz: number): number => 69 + 12 * Math.log2(frequencyHz / 440)
-
-const clampBeat = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value))
-const midiToPitchClass = (midi: number): number => ((Math.round(midi) % 12) + 12) % 12
-const midiToNoteName = (midi: number): string => NOTE_NAMES[midiToPitchClass(midi)] ?? 'C'
-
-const nearestMidiForPitchClass = (sourceMidi: number, pitchClass: number): number => {
-  let best = sourceMidi
-  let bestDistance = Number.POSITIVE_INFINITY
-  const sourceOctave = Math.round(sourceMidi / 12)
-
-  for (let octaveOffset = -2; octaveOffset <= 2; octaveOffset += 1) {
-    const candidate = (sourceOctave + octaveOffset) * 12 + pitchClass
-    const distance = Math.abs(candidate - sourceMidi)
-    if (distance < bestDistance) {
-      bestDistance = distance
-      best = candidate
-    }
-  }
-
-  return best
-}
-
-const buildNotePitchContour = (note: LickNote, tempo: number): PitchSegment => {
-  const durationBeats = Math.max(note.duration, 0)
-  if (durationBeats <= 0) return []
-
-  const beatSeconds = 60 / Math.max(tempo, 1)
-  const points: PitchSegment = []
-
-  for (
-    let localBeat = 0;
-    localBeat <= durationBeats + TARGET_CONTOUR_STEP_BEATS * 0.5;
-    localBeat += TARGET_CONTOUR_STEP_BEATS
-  ) {
-    const clampedBeat = clampBeat(localBeat, 0, durationBeats)
-    let midi = note.midi
-
-    if (note.bend && clampedBeat >= note.bend.start) {
-      const bendStart = clampBeat(note.bend.start, 0, durationBeats)
-      const bendEnd = clampBeat(note.bend.end, bendStart, durationBeats)
-
-      if (bendEnd > bendStart) {
-        if (clampedBeat <= bendEnd) {
-          const bendProgress = (clampedBeat - bendStart) / (bendEnd - bendStart)
-          midi = note.midi + (note.bend.toMidi - note.midi) * bendProgress
-        } else {
-          midi = note.bend.toMidi
-        }
-      } else {
-        midi = note.bend.toMidi
-      }
-    }
-
-    if (note.vibrato && clampedBeat >= note.vibrato.start) {
-      const vibratoElapsedBeats = clampedBeat - note.vibrato.start
-      const vibratoElapsedSeconds = vibratoElapsedBeats * beatSeconds
-      midi += Math.sin(2 * Math.PI * note.vibrato.rateHz * vibratoElapsedSeconds) * note.vibrato.depthSemitones
-    }
-
-    points.push({
-      time: note.start + clampedBeat,
-      midi,
-    })
-  }
-
-  return points
-}
-
-const buildTargetPitchSegments = (notes: LickNote[], tempo: number): PitchSegment[] =>
-  notes.map((note) => buildNotePitchContour(note, tempo)).filter((segment) => segment.length > 0)
-
-const getClosestContourMidi = (segment: PitchSegment, time: number): number | null => {
-  if (segment.length === 0) return null
-  let bestMidi = segment[0].midi
-  let bestDistance = Math.abs(segment[0].time - time)
-  for (let i = 1; i < segment.length; i += 1) {
-    const distance = Math.abs(segment[i].time - time)
-    if (distance < bestDistance) {
-      bestDistance = distance
-      bestMidi = segment[i].midi
-    }
-  }
-  return bestMidi
-}
-
-const applyPracticeStageToLick = (
-  lick: GenerateLickResponse,
-  stage: PracticeStageId,
-): GenerateLickResponse => {
-  if (stage !== 'starter') {
-    return lick
-  }
-
-  const chordRoot = resolveChordMidi(lick.degree)[0] ?? 60
-  const chordRootPitchClass = midiToPitchClass(chordRoot)
-  const targetPitchClasses = STARTER_TARGET_INTERVALS.map((interval) => (chordRootPitchClass + interval) % 12)
-
-  const stagedNotes = lick.notes.slice(0, STARTER_MAX_NOTES).map((note) => {
-    const snappedMidiCandidates = targetPitchClasses.map((pitchClass) =>
-      nearestMidiForPitchClass(note.midi, pitchClass),
-    )
-    const snappedMidi = snappedMidiCandidates.reduce((best, candidate) =>
-      Math.abs(candidate - note.midi) < Math.abs(best - note.midi) ? candidate : best,
-    )
-
-    return {
-      ...note,
-      midi: snappedMidi,
-      noteName: midiToNoteName(snappedMidi),
-      bend: undefined,
-      vibrato: undefined,
-      technique: 'normal' as const,
-    }
-  })
-
-  return {
-    ...lick,
-    notes: stagedNotes,
-  }
-}
-
-const detectPitchHz = (buffer: Float32Array<ArrayBuffer>, sampleRate: number): number | null => {
-  let rms = 0
-  for (let i = 0; i < buffer.length; i += 1) {
-    rms += buffer[i] * buffer[i]
-  }
-  rms = Math.sqrt(rms / buffer.length)
-  if (rms < 0.008) return null
-
-  const minLag = Math.floor(sampleRate / MAX_PITCH_HZ)
-  const maxLag = Math.floor(sampleRate / MIN_PITCH_HZ)
-  let bestLag = -1
-  let bestScore = 0
-
-  for (let lag = minLag; lag <= maxLag; lag += 1) {
-    let sumXY = 0
-    let sumX2 = 0
-    let sumY2 = 0
-    const limit = buffer.length - lag
-
-    for (let i = 0; i < limit; i += 1) {
-      const x = buffer[i]
-      const y = buffer[i + lag]
-      sumXY += x * y
-      sumX2 += x * x
-      sumY2 += y * y
-    }
-
-    const denom = Math.sqrt(sumX2 * sumY2)
-    if (denom <= 1e-7) continue
-    const score = sumXY / denom
-    if (score > bestScore) {
-      bestScore = score
-      bestLag = lag
-    }
-  }
-
-  if (bestLag <= 0 || bestScore < 0.82) return null
-  return sampleRate / bestLag
 }
 
 function App() {
@@ -269,10 +48,14 @@ function App() {
 
   const [audioError, setAudioError] = useState<string>('')
   const [generatedLickByBar, setGeneratedLickByBar] = useState<Record<number, GenerateLickResponse>>({})
-  const [selectedFormId, setSelectedFormId] = useState<string | null>(null)
+  const [activeKeyRoot, setActiveKeyRoot] = useState<NoteName>('E')
   const [activeBeat, setActiveBeat] = useState<number | null>(null)
   const [practicePhase, setPracticePhase] = useState<PracticePhase>('idle')
-  const [practiceStage, setPracticeStage] = useState<PracticeStageId>('starter')
+  const [bluesFormId, setBluesFormId] = useState<BluesFormId>('all-dominant')
+  const [generatorLevel, setGeneratorLevel] = useState<GeneratorLevelId>('level-1')
+  const [enabledDegrees, setEnabledDegrees] = useState<DegreeOptionId[]>(DEGREE_LEVEL_PRESETS['level-1'])
+  const [includeMajorNotes, setIncludeMajorNotes] = useState<boolean>(true)
+  const [allowBend, setAllowBend] = useState<boolean>(false)
   const [micStatus, setMicStatus] = useState<MicStatus>('off')
   const [micError, setMicError] = useState<string>('')
   const [userPitchPoints, setUserPitchPoints] = useState<PitchPoint[]>([])
@@ -291,57 +74,18 @@ function App() {
   const isGeneratingRef = useRef<boolean>(false)
   const startPracticeCycleRef = useRef<(tempo: number) => void>(() => {})
 
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-  const formsQuery = useQuery({
-    queryKey: ['forms', apiBaseUrl],
-    queryFn: () => fetchForms(apiBaseUrl),
-  })
-  const activeForm = useMemo<FormSummaryResponse | null>(
-    () => {
-      const forms = formsQuery.data ?? []
-      return forms.find((form) => form.id === selectedFormId) ?? forms[0] ?? null
-    },
-    [formsQuery.data, selectedFormId],
+  const selectedBluesForm = BLUES_FORM_MAP[bluesFormId]
+  const isMajorBlues = selectedBluesForm.isMajorBlues
+  const activeBars = selectedBluesForm.bars.map((_, index) =>
+    buildBarContextFromForm(index, activeKeyRoot, bluesFormId),
   )
-  const formBarsQuery = useQuery({
-    queryKey: ['form-bars', apiBaseUrl, activeForm?.id],
-    queryFn: () => fetchFormBars(apiBaseUrl, activeForm!.id),
-    enabled: Boolean(activeForm?.id),
-  })
-  const dbBars = formBarsQuery.data ?? []
-  const activeBars = dbBars.length > 0 ? dbBars : BLUES_PROGRESSION.map((_, index) => buildFallbackBarContext(index))
   const barCount = activeBars.length
   const safeBarIndex = Math.min(barIndex, Math.max(0, barCount - 1))
-  const currentBarContext = activeBars[safeBarIndex] ?? buildFallbackBarContext(0)
+  const currentBarContext = activeBars[safeBarIndex] ?? buildBarContextFromForm(0, activeKeyRoot, bluesFormId)
   const currentDegree = currentBarContext.degree
   const currentChord = currentBarContext.chord_symbol
-  const selectedNotePolicy = STAGE_NOTE_POLICY[practiceStage]
-  const libraryLicksQuery = useQuery({
-    queryKey: ['library-licks', apiBaseUrl, activeForm?.id, selectedNotePolicy],
-    queryFn: () =>
-      fetchLicks(apiBaseUrl, {
-        formId: activeForm!.id,
-        notePolicy: selectedNotePolicy,
-        limit: 200,
-      }),
-    enabled: Boolean(activeForm?.id),
-  })
-  const libraryLickByBar = useMemo<Record<number, GenerateLickResponse>>(() => {
-    const rows = (libraryLicksQuery.data ?? []) as StoredLickResponse[]
-    const nextByBar: Record<number, GenerateLickResponse> = {}
-    rows.forEach((row) => {
-      if (nextByBar[row.bar_index] === undefined) {
-        nextByBar[row.bar_index] = applyPracticeStageToLick(row.generated, practiceStage)
-      }
-    })
-    return nextByBar
-  }, [libraryLicksQuery.data, practiceStage])
-  const lickByBar = useMemo(
-    () => ({ ...libraryLickByBar, ...generatedLickByBar }),
-    [libraryLickByBar, generatedLickByBar],
-  )
+  const lickByBar = generatedLickByBar
   const selectedLick = lickByBar[safeBarIndex] ?? null
-  const selectedPracticeStage = PRACTICE_STAGES.find((stage) => stage.id === practiceStage) ?? PRACTICE_STAGES[0]
   const selectedLickNotes = useMemo(
     () => (selectedLick ? normalizeLickNotes(selectedLick.notes) : []),
     [selectedLick],
@@ -642,44 +386,8 @@ function App() {
     return { minMidi, maxMidi }
   }, [selectedLickNotes, targetPitchSegments, userPitchPoints])
 
-  const chorusMutation = useMutation({
-    mutationFn: (payload: GenerateChorusRequest) => postGenerateChorus(apiBaseUrl, payload),
-    onSuccess: (data) => {
-      const nextByBar: Record<number, GenerateLickResponse> = {}
-      data.bars.forEach((bar, index) => {
-        nextByBar[index] = applyPracticeStageToLick(bar, practiceStage)
-      })
-      setGeneratedLickByBar(nextByBar)
-      setAudioError('')
-    },
-  })
-
-  const generateMutation = useMutation({
-    mutationFn: ({ payload }: { bar: number; payload: GenerateLickRequest }) =>
-      postGenerateLick(apiBaseUrl, payload),
-    onSuccess: (data, variables) => {
-      const stagedLick = applyPracticeStageToLick(data, practiceStage)
-      setGeneratedLickByBar((prev) => ({ ...prev, [variables.bar]: stagedLick }))
-      startPracticeCycle(stagedLick.tempo)
-      void playLickOverChord({
-        tempo: stagedLick.tempo,
-        chordMidi: resolveChordMidi(stagedLick.degree),
-        notes: normalizeLickNotes(stagedLick.notes),
-      }).catch((e) => {
-        setAudioError(e instanceof Error ? e.message : 'Failed to play generated lick')
-      })
-    },
-  })
-
-  const requestError =
-    (formsQuery.error as Error | null)?.message ||
-    (formBarsQuery.error as Error | null)?.message ||
-    (libraryLicksQuery.error as Error | null)?.message ||
-    (chorusMutation.error as Error | null)?.message ||
-    (generateMutation.error as Error | null)?.message ||
-    micError ||
-    audioError
-  const isGenerating = generateMutation.isPending || chorusMutation.isPending
+  const requestError = micError || audioError
+  const isGenerating = false
 
   useEffect(() => {
     selectedLickRef.current = selectedLick
@@ -689,25 +397,70 @@ function App() {
     isGeneratingRef.current = isGenerating
   }, [isGenerating])
 
+  const effectiveIncludeMajorNotes = isMajorBlues && includeMajorNotes
+
+  const onBluesFormChange = (nextFormId: BluesFormId) => {
+    const nextForm = BLUES_FORM_MAP[nextFormId]
+    setBluesFormId(nextFormId)
+    setIncludeMajorNotes(nextForm.isMajorBlues)
+    setEnabledDegrees(buildRecommendedDegreePool(generatorLevel, nextForm.isMajorBlues, nextForm.isMajorBlues))
+    setAllowBend(false)
+    setGeneratedLickByBar({})
+    setBarIndex(0)
+  }
+
+  const onGeneratorLevelChange = (level: GeneratorLevelId) => {
+    setGeneratorLevel(level)
+    setEnabledDegrees(buildRecommendedDegreePool(level, isMajorBlues, effectiveIncludeMajorNotes))
+    if (level === 'level-1') {
+      setAllowBend(false)
+    }
+  }
+
+  const onIncludeMajorNotesChange = (checked: boolean) => {
+    if (!isMajorBlues) return
+    setIncludeMajorNotes(checked)
+    setEnabledDegrees(buildRecommendedDegreePool(generatorLevel, true, checked))
+  }
+
+  const toggleDegree = (degreeId: DegreeOptionId) => {
+    if (!isMajorBlues && isMajorExtensionDegree(degreeId)) {
+      return
+    }
+    setEnabledDegrees((prev) => {
+      const isEnabled = prev.includes(degreeId)
+      if (isEnabled) {
+        if (prev.length === 1) return prev
+        return prev.filter((degree) => degree !== degreeId)
+      }
+      return [...prev, degreeId]
+    })
+  }
+
   const generateForBar = (targetBar: number) => {
-    const context = activeBars[targetBar] ?? buildFallbackBarContext(targetBar)
-    const degree = context.degree as GenerateLickRequest['degree']
+    const context = activeBars[targetBar] ?? buildBarContextFromForm(targetBar, activeKeyRoot, bluesFormId)
+    const degree = resolvePracticeDegreeFromLabel(context.degree)
     const chord = context.chord_symbol
 
-    const flavor: 'major' | 'minor' =
-      practiceStage === 'mixed' ? (Math.random() < 0.5 ? 'major' : 'minor') : 'major'
-
     setAudioError('')
-    generateMutation.reset()
-    generateMutation.mutate({
-      bar: targetBar,
-      payload: {
-        key: 'A',
-        degree,
-        chord,
-        flavor,
-        tempo: 76,
-      },
+    const generated = createPermutationLick({
+      keyRoot: activeKeyRoot,
+      chordSymbol: chord,
+      degree,
+      flavor: effectiveIncludeMajorNotes ? 'major' : 'minor',
+      tempo: 76,
+      level: generatorLevel,
+      enabledDegrees,
+      includeBend: allowBend && enabledDegrees.includes('b3'),
+    })
+    setGeneratedLickByBar((prev) => ({ ...prev, [targetBar]: generated }))
+    startPracticeCycle(generated.tempo)
+    void playLickOverChord({
+      tempo: generated.tempo,
+      chordMidi: resolveChordMidi(generated.chord),
+      notes: normalizeLickNotes(generated.notes),
+    }).catch((e) => {
+      setAudioError(e instanceof Error ? e.message : 'Failed to play generated lick')
     })
   }
 
@@ -717,19 +470,8 @@ function App() {
     generateForBar(nextIndex)
   }
 
-  const generateFullChorus = () => {
-    setAudioError('')
-    chorusMutation.reset()
-    generateMutation.reset()
-    chorusMutation.mutate({
-      key: 'A',
-      flavor: 'major',
-      tempo: 76,
-    })
-  }
-
   const generateSelectedBar = () => {
-    generateForBar(barIndex)
+    generateForBar(safeBarIndex)
   }
 
   const replaySelectedBar = () => {
@@ -738,7 +480,7 @@ function App() {
     startPracticeCycle(selectedLick.tempo)
     void playLickOverChord({
       tempo: selectedLick.tempo,
-      chordMidi: resolveChordMidi(selectedLick.degree),
+      chordMidi: resolveChordMidi(selectedLick.chord),
       notes: normalizeLickNotes(selectedLick.notes),
     }).catch((e) => {
       setAudioError(e instanceof Error ? e.message : 'Failed to replay selected bar lick')
@@ -760,7 +502,7 @@ function App() {
       startPracticeCycleRef.current(lick.tempo)
       void playLickOverChord({
         tempo: lick.tempo,
-        chordMidi: resolveChordMidi(lick.degree),
+        chordMidi: resolveChordMidi(lick.chord),
         notes: normalizeLickNotes(lick.notes),
       }).catch((e) => {
         setAudioError(e instanceof Error ? e.message : 'Failed to replay selected bar lick')
@@ -774,181 +516,226 @@ function App() {
   }, [])
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-8">
+    <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-8">
       <div className="space-y-1">
         <h1 className="text-3xl font-bold tracking-tight text-zinc-100">EchoLick Blues POC</h1>
         <p className="text-sm text-zinc-400">
-          Select a bar in the grid, generate for that bar, and replay to practice.
+          Select a bar, pick training degrees, and hear a locally generated permutation lick.
         </p>
       </div>
 
-      <Card className="space-y-3">
-        <CardTitle>Progression</CardTitle>
-        <p className="text-sm text-zinc-300">
-          {activeForm
-            ? `${activeForm.name} (${activeForm.key_root}, ${activeForm.time_signature})`
-            : 'Loading form...'}
-        </p>
-        <div className="grid grid-cols-1 gap-2 text-sm text-zinc-200 sm:grid-cols-3">
-          <p>
-            Current bar: <strong>{safeBarIndex + 1}</strong> / {barCount}
-          </p>
-          <p>
-            Current degree: <strong>{currentDegree}</strong>
-          </p>
-          <p>
-            Current chord: <strong>{currentChord}</strong>
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-          {activeBars.map((bar) => {
-            const index = bar.bar_index
-            const isSelected = index === safeBarIndex
-            const hasLick = Boolean(lickByBar[index])
-            return (
-              <button
-                key={`${index}-${bar.id}`}
-                type="button"
-                onClick={() => setBarIndex(index)}
-                className={`rounded-md border p-2 text-left text-xs transition ${
-                  isSelected
-                    ? 'border-blue-400 bg-blue-500/10 text-blue-100'
-                    : 'border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-zinc-500'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold">Bar {index + 1}</span>
-                  <span
-                    className={`h-2 w-2 rounded-full ${hasLick ? 'bg-emerald-400' : 'bg-zinc-600'}`}
-                  />
-                </div>
-                <div className="mt-1 text-zinc-400">
-                  {bar.degree} - {bar.chord_symbol}
-                </div>
-              </button>
-            )
-          })}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <label className="flex min-w-64 flex-col gap-1 text-xs text-zinc-300">
-            <span className="font-medium text-zinc-200">Form</span>
-            <select
-              value={activeForm?.id ?? ''}
-              onChange={(event) => {
-                setSelectedFormId(event.target.value)
-                setBarIndex(0)
-                setGeneratedLickByBar({})
-              }}
-              className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
-            >
-              {(formsQuery.data ?? []).map((form) => (
-                <option key={form.id} value={form.id}>
-                  {form.name}
-                </option>
-              ))}
-            </select>
-            <span className="text-[11px] text-zinc-400">Source: Supabase form library</span>
-          </label>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <label className="flex min-w-64 flex-col gap-1 text-xs text-zinc-300">
-            <span className="font-medium text-zinc-200">Practice Stage</span>
-            <select
-              value={practiceStage}
-              onChange={(event) => setPracticeStage(event.target.value as PracticeStageId)}
-              className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
-            >
-              {PRACTICE_STAGES.map((stage) => (
-                <option key={stage.id} value={stage.id}>
-                  {stage.label}
-                </option>
-              ))}
-            </select>
-            <span className="text-[11px] text-zinc-400">
-              {selectedPracticeStage.description} (policy: {selectedNotePolicy})
-            </span>
-          </label>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={generateFullChorus} variant="primary" disabled={isGenerating}>
-            {chorusMutation.isPending ? 'Generating 12 Bars...' : 'Generate Full 12 Bars'}
-          </Button>
-          <Button onClick={generateSelectedBar} disabled={isGenerating}>
-            {generateMutation.isPending ? 'Generating...' : 'Generate Selected Bar'}
-          </Button>
-          <Button onClick={goToNextBarAndGenerate} disabled={isGenerating}>
-            {generateMutation.isPending ? 'Generating...' : 'Next Bar + Generate'}
-          </Button>
-          <Button onClick={replaySelectedBar} disabled={!selectedLick || isGenerating}>
-            Replay Selected Bar
-          </Button>
-          <span className="self-center text-xs text-zinc-400">
-            Tip: press <kbd className="rounded border border-zinc-700 px-1 py-0.5 text-[10px]">Space</kbd> to replay.
-          </span>
-        </div>
-        {!selectedLick ? (
-          <p className="text-xs text-zinc-500">
-            No lick for this bar yet. Click Generate Selected Bar.
-          </p>
-        ) : null}
-        {requestError ? <p className="text-sm text-red-400">{requestError}</p> : null}
-      </Card>
+      <div className="grid items-stretch gap-4 lg:grid-cols-[1.8fr_1fr]">
+        <div className="space-y-4">
+          <Card className="space-y-3">
+            <CardTitle>Progression</CardTitle>
+            <p className="text-sm text-zinc-300">
+              Key <strong>{activeKeyRoot}</strong> - {selectedBluesForm.label}
+            </p>
+            <div className="grid grid-cols-1 gap-2 text-sm text-zinc-200 sm:grid-cols-3">
+              <p>
+                Current bar: <strong>{safeBarIndex + 1}</strong> / {barCount}
+              </p>
+              <p>
+                Current degree: <strong>{currentDegree}</strong>
+              </p>
+              <p>
+                Current chord: <strong>{currentChord}</strong>
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+              {activeBars.map((bar) => {
+                const index = bar.bar_index
+                const isSelected = index === safeBarIndex
+                const hasLick = Boolean(lickByBar[index])
+                return (
+                  <button
+                    key={`${index}-${bar.id}`}
+                    type="button"
+                    onClick={() => setBarIndex(index)}
+                    className={`rounded-md border p-2 text-left text-xs transition ${
+                      isSelected
+                        ? 'border-blue-400 bg-blue-500/10 text-blue-100'
+                        : 'border-zinc-700 bg-zinc-900 text-zinc-200 hover:border-zinc-500'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold">Bar {index + 1}</span>
+                      <span
+                        className={`h-2 w-2 rounded-full ${hasLick ? 'bg-emerald-400' : 'bg-zinc-600'}`}
+                      />
+                    </div>
+                    <div className="mt-1 text-zinc-400">
+                      {bar.degree} - {bar.chord_symbol}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={goToNextBarAndGenerate} variant="primary" disabled={isGenerating}>
+                Hear Next
+              </Button>
+              <Button onClick={generateSelectedBar} disabled={isGenerating}>
+                Hear Selected Bar
+              </Button>
+              <Button onClick={replaySelectedBar} disabled={!selectedLick || isGenerating}>
+                Hear Again
+              </Button>
+              <span className="self-center text-xs text-zinc-400">
+                Tip: press <kbd className="rounded border border-zinc-700 px-1 py-0.5 text-[10px]">Space</kbd> to replay.
+              </span>
+            </div>
+            {!selectedLick ? (
+              <p className="text-xs text-zinc-500">No lick for this bar yet. Click Hear Selected Bar.</p>
+            ) : null}
+            {requestError ? <p className="text-sm text-red-400">{requestError}</p> : null}
+          </Card>
 
-      <Card className="space-y-3">
-        <CardTitle>Selected Bar Lick</CardTitle>
-        <pre className="max-h-96 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-200">
-          {selectedLick ? JSON.stringify(selectedLick, null, 2) : 'No lick generated for this bar yet.'}
-        </pre>
-      </Card>
-
-      <Card className="space-y-3">
-        <CardTitle>Metronome + Turn</CardTitle>
-        <p className="text-xs text-zinc-400">
-          First bar is listen/playback, second bar is your turn to sing or play the phrase. Click track runs through both bars.
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => void enableMicrophone()} disabled={micStatus !== 'off'}>
-            {micStatus === 'off' ? 'Enable Mic Capture' : 'Mic Ready'}
-          </Button>
-          <Button onClick={() => void stopAndDisposeMicrophone()} disabled={micStatus === 'off'}>
-            Disable Mic
-          </Button>
-          <span className="text-xs text-zinc-400">
-            Mic status:{' '}
-            <strong className="text-zinc-200">
-              {micStatus === 'capturing'
-                ? 'capturing bends'
-                : micStatus === 'ready'
-                  ? 'ready'
-                  : 'off'}
-            </strong>
-          </span>
+          <Card className="space-y-3">
+            <CardTitle>Metronome + Turn</CardTitle>
+            <p className="text-xs text-zinc-400">
+              First bar is listen/playback, second bar is your turn to sing or play the phrase. Click track runs through both bars.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={() => void enableMicrophone()} disabled={micStatus !== 'off'}>
+                {micStatus === 'off' ? 'Enable Mic Capture' : 'Mic Ready'}
+              </Button>
+              <Button onClick={() => void stopAndDisposeMicrophone()} disabled={micStatus === 'off'}>
+                Disable Mic
+              </Button>
+              <span className="text-xs text-zinc-400">
+                Mic status:{' '}
+                <strong className="text-zinc-200">
+                  {micStatus === 'capturing'
+                    ? 'capturing bends'
+                    : micStatus === 'ready'
+                      ? 'ready'
+                      : 'off'}
+                </strong>
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {[0, 1, 2, 3].map((beat) => {
+                const isActive = beat === activeBeat
+                return (
+                  <div
+                    key={beat}
+                    className={`flex h-10 w-10 items-center justify-center rounded-full border text-sm font-semibold ${
+                      isActive
+                        ? 'border-indigo-300 bg-indigo-500/25 text-indigo-100'
+                        : 'border-zinc-700 bg-zinc-900 text-zinc-400'
+                    }`}
+                  >
+                    {beat + 1}
+                  </div>
+                )
+              })}
+              <span className="ml-2 rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300">
+                {practicePhase === 'listen'
+                  ? 'Listen'
+                  : practicePhase === 'your-turn'
+                    ? 'Your turn'
+                    : 'Idle'}
+              </span>
+            </div>
+          </Card>
         </div>
-        <div className="flex items-center gap-2">
-          {[0, 1, 2, 3].map((beat) => {
-            const isActive = beat === activeBeat
-            return (
-              <div
-                key={beat}
-                className={`flex h-10 w-10 items-center justify-center rounded-full border text-sm font-semibold ${
-                  isActive
-                    ? 'border-indigo-300 bg-indigo-500/25 text-indigo-100'
-                    : 'border-zinc-700 bg-zinc-900 text-zinc-400'
-                }`}
+
+        <div className="h-full">
+          <Card className="flex h-full flex-col space-y-3">
+            <CardTitle>Configuration</CardTitle>
+            <p className="text-xs text-zinc-400">Blues form + note pool controls for local permutation generation.</p>
+            <label className="flex flex-col gap-1 text-xs text-zinc-300">
+              <span className="font-medium text-zinc-200">Key</span>
+              <select
+                value={activeKeyRoot}
+                onChange={(event) => {
+                  setActiveKeyRoot(event.target.value as NoteName)
+                  setGeneratedLickByBar({})
+                  setBarIndex(0)
+                }}
+                className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
               >
-                {beat + 1}
+                {NOTE_ORDER.map((note) => (
+                  <option key={note} value={note}>
+                    {note}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-zinc-300">
+              <span className="font-medium text-zinc-200">Blues Form</span>
+              <select
+                value={bluesFormId}
+                onChange={(event) => onBluesFormChange(event.target.value as BluesFormId)}
+                className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
+              >
+                {BLUES_FORM_OPTIONS.map((form) => (
+                  <option key={form.id} value={form.id}>
+                    {form.label}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[11px] text-zinc-400">{selectedBluesForm.description}</span>
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-zinc-300">
+              <span className="font-medium text-zinc-200">Level</span>
+              <select
+                value={generatorLevel}
+                onChange={(event) => onGeneratorLevelChange(event.target.value as GeneratorLevelId)}
+                className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
+              >
+                <option value="level-1">Level 1: root-minor3-fifth</option>
+                <option value="level-2">Level 2: add 4 and b7</option>
+                <option value="level-3">Level 3: add b5 and 2-beat rhythm values</option>
+              </select>
+            </label>
+            <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
+              <input
+                type="checkbox"
+                checked={effectiveIncludeMajorNotes}
+                onChange={(event) => onIncludeMajorNotesChange(event.target.checked)}
+                disabled={!isMajorBlues}
+                className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+              />
+              Add major-blues notes (2, 3, 6)
+            </label>
+            <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
+              <input
+                type="checkbox"
+                checked={allowBend}
+                onChange={(event) => setAllowBend(event.target.checked)}
+                className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+              />
+              Include quarter bend on b3 (max one per bar)
+            </label>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-zinc-200">Degree Pool (relative to song key)</p>
+              <div className="grid grid-cols-2 gap-2">
+                {DEGREE_OPTIONS.map((option) => {
+                  const isEnabled = enabledDegrees.includes(option.id)
+                  const isBlocked = !isMajorBlues && isMajorExtensionDegree(option.id)
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => toggleDegree(option.id)}
+                      disabled={isBlocked}
+                      className={`rounded-md border px-2 py-2 text-xs font-medium transition ${
+                        isEnabled
+                          ? 'border-sky-400 bg-sky-500/20 text-sky-100'
+                          : 'border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-500'
+                      } ${isBlocked ? 'cursor-not-allowed opacity-45' : ''}`}
+                    >
+                      {option.label}
+                    </button>
+                  )
+                })}
               </div>
-            )
-          })}
-          <span className="ml-2 rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300">
-            {practicePhase === 'listen'
-              ? 'Listen'
-              : practicePhase === 'your-turn'
-                ? 'Your turn'
-                : 'Idle'}
-          </span>
+            </div>
+          </Card>
         </div>
-      </Card>
+      </div>
 
       <Card className="space-y-3">
         <CardTitle>Pitch Timeline (Time X / Pitch Y)</CardTitle>
@@ -1037,6 +824,13 @@ function App() {
             )
           })}
         </svg>
+      </Card>
+
+      <Card className="space-y-3">
+        <CardTitle>Selected Bar Lick</CardTitle>
+        <pre className="max-h-96 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-200">
+          {selectedLick ? JSON.stringify(selectedLick, null, 2) : 'No lick generated for this bar yet.'}
+        </pre>
       </Card>
     </main>
   )

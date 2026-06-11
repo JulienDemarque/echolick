@@ -9,8 +9,8 @@ import {
 import type {
   FormBarContext,
   FormSummary,
-  GenerateChorusRequest,
-  GenerateLickRequest,
+  GenerateChorusRequest as GeneratedGenerateChorusRequest,
+  GenerateLickRequest as GeneratedGenerateLickRequest,
   GeneratedChorus,
   GeneratedLick,
   HealthcheckHealthGetResponse,
@@ -18,13 +18,18 @@ import type {
 } from './generated/types.gen'
 import { client as generatedClient } from './generated/client.gen'
 
-export type GenerateLickResponse = GeneratedLick
-export type GenerateChorusResponse = GeneratedChorus
 export type HealthResponse = HealthcheckHealthGetResponse
 export type FormSummaryResponse = FormSummary
 export type FormBarResponse = FormBarContext
 export type StoredLickResponse = StoredLick
-export type { GenerateChorusRequest, GenerateLickRequest }
+export type KeyRoot = 'C' | 'C#' | 'D' | 'D#' | 'E' | 'F' | 'F#' | 'G' | 'G#' | 'A' | 'A#' | 'B'
+export type GenerateLickResponse = Omit<GeneratedLick, 'key'> & { key?: KeyRoot }
+export type GenerateChorusResponse = Omit<GeneratedChorus, 'key' | 'bars'> & {
+  key?: KeyRoot
+  bars: GenerateLickResponse[]
+}
+export type GenerateLickRequest = Omit<GeneratedGenerateLickRequest, 'key'> & { key: KeyRoot }
+export type GenerateChorusRequest = Omit<GeneratedGenerateChorusRequest, 'key'> & { key: KeyRoot }
 
 const withBaseUrl = (apiBaseUrl: string) => {
   generatedClient.setConfig({ baseUrl: apiBaseUrl })
@@ -50,7 +55,7 @@ export const postGenerateLick = async (
 ): Promise<GenerateLickResponse> => {
   const { data, error } = await generateLickRouteApiGenerateLickPost({
     client: withBaseUrl(apiBaseUrl),
-    body: payload,
+    body: payload as GeneratedGenerateLickRequest,
   })
   if (error) {
     throw new Error(`Generate failed: ${JSON.stringify(error)}`)
@@ -67,7 +72,7 @@ export const postGenerateChorus = async (
 ): Promise<GenerateChorusResponse> => {
   const { data, error } = await generateChorusRouteApiGenerateChorusPost({
     client: withBaseUrl(apiBaseUrl),
-    body: payload,
+    body: payload as GeneratedGenerateChorusRequest,
   })
   if (error) {
     throw new Error(`Generate chorus failed: ${JSON.stringify(error)}`)

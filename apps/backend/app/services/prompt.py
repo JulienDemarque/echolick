@@ -31,27 +31,6 @@ INTERVAL_LABELS = {
     11: "7",
 }
 
-KEY_A_REFERENCE = [
-    ("A", "1"),
-    ("B", "2"),
-    ("C", "b3"),
-    ("C#", "3"),
-    ("D", "4"),
-    ("E", "5"),
-    ("F#", "6"),
-    ("G", "b7"),
-]
-
-A_MAJOR_BLUES_POOL = ["A", "B", "C", "C#", "E", "F#"]
-D_MAJOR_BLUES_POOL = ["D", "E", "F", "F#", "A", "B"]
-
-CHORD_TONES_BY_CHORD = {
-    "A7": ["A", "C#", "E", "G"],
-    "D7": ["D", "F#", "A", "C"],
-    "E7": ["E", "G#", "B", "D"],
-}
-
-
 def _get_chord_root(chord: str) -> str:
     if len(chord) >= 2 and chord[1] in {"#", "b"}:
         return chord[:2]
@@ -65,17 +44,16 @@ def _build_reference_context(payload: GenerateLickRequest) -> str:
     chord = payload.chord
     chord_root = _get_chord_root(chord)
     chord_root_semitone = NOTE_TO_SEMITONE.get(chord_root, NOTE_TO_SEMITONE["A"])
-    chord_tones = set(CHORD_TONES_BY_CHORD.get(chord, []))
+    chord_tones = set()
+    for interval in [0, 4, 7, 10]:
+        semitone = (chord_root_semitone + interval) % 12
+        chord_tones.add(next(note for note, value in NOTE_TO_SEMITONE.items() if value == semitone))
 
-    if chord == "D7":
-        pool = D_MAJOR_BLUES_POOL
-    else:
-        # Default major-blues pool anchored on A for I and V in this POC.
-        pool = A_MAJOR_BLUES_POOL
-
-    key_reference_lines = "\n".join(
-        [f"- {note}: degree vs key A = {degree}" for note, degree in KEY_A_REFERENCE]
-    )
+    # Major blues pool formula: 1 2 b3 3 5 6
+    key_semitone = NOTE_TO_SEMITONE.get(payload.key, NOTE_TO_SEMITONE["A"])
+    pool = []
+    for interval in [0, 2, 3, 4, 7, 9]:
+        pool.append(next(note for note, semitone in NOTE_TO_SEMITONE.items() if semitone == (key_semitone + interval) % 12))
 
     pool_reference_lines = []
     for note in pool:
@@ -89,14 +67,11 @@ def _build_reference_context(payload: GenerateLickRequest) -> str:
             f"- {note}: interval vs {chord_root} = {interval_label}, role vs {chord} = {chord_role}"
         )
 
-    pool_name = "D major blues pool" if chord == "D7" else "A major blues pool"
     pool_reference = "\n".join(pool_reference_lines)
 
     return f"""
 Theory references for MAJOR blues (use these intentionally):
-- Key-center note degrees relative to A:
-{key_reference_lines}
-- Active note pool for this bar ({pool_name}):
+- Active note pool for this bar (major blues pool) in key {payload.key}:
 {pool_reference}
 - Prioritize chord-tones on strong beats (1 and 3), then mix in color notes on weak beats.
 - In major blues, occasionally use b3 as a blue-note passing tone resolving to 3.
@@ -124,13 +99,16 @@ Constraints:
 - Difficulty: beginner/intermediate
 - Use 4 to 8 notes
 - Use start and duration in beats
+- Rhythm should be simple and straight (minimal syncopation)
+- Allowed starts: 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5
+- Allowed durations only: 0.5, 1, 2
 - All notes must fit within 0 <= start < 4
 - No note may end after beat 4
 - If note has bend: bend.start and bend.end are offsets within the note duration (NOT bar time)
 - If note has vibrato: vibrato.start is an offset within the note duration (NOT bar time)
 - bend.start and bend.end must satisfy 0 <= bend.start < bend.end <= note.duration
 - vibrato.start must satisfy 0 <= vibrato.start <= note.duration
-- Prefer notes from the A {payload.flavor} blues scale
+- Prefer notes from the {payload.key} {payload.flavor} blues scale
 - Target chord tones of the current chord on strong beats when possible
 - Include at most one bend
 - Include at most two vibrato markings
@@ -141,7 +119,7 @@ Constraints:
 
 Return this exact JSON shape:
 {{
-  "key": "A",
+  "key": "{payload.key}",
   "degree": "{payload.degree}",
   "chord": "{payload.chord}",
   "flavor": "{payload.flavor}",
@@ -172,6 +150,12 @@ Return this exact JSON shape:
 
 
 def build_chorus_generation_prompt(payload: GenerateChorusRequest) -> str:
+    note_order = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+    key_index = note_order.index(payload.key) if payload.key in note_order else note_order.index("A")
+    i_chord = f"{note_order[key_index]}7"
+    iv_chord = f"{note_order[(key_index + 5) % 12]}7"
+    v_chord = f"{note_order[(key_index + 7) % 12]}7"
+
     return f"""
 You are generating a 12-bar blues chorus for an ear-training app.
 
@@ -183,10 +167,13 @@ Global constraints:
 - Tempo: {payload.tempo}
 - Time signature: 4/4
 - Generate exactly 12 bars with this progression:
-  1:I(A7), 2:IV(D7), 3:I(A7), 4:I(A7), 5:IV(D7), 6:IV(D7),
-  7:I(A7), 8:I(A7), 9:V(E7), 10:IV(D7), 11:I(A7), 12:V(E7)
+  1:I({i_chord}), 2:IV({iv_chord}), 3:I({i_chord}), 4:I({i_chord}), 5:IV({iv_chord}), 6:IV({iv_chord}),
+  7:I({i_chord}), 8:I({i_chord}), 9:V({v_chord}), 10:IV({iv_chord}), 11:I({i_chord}), 12:V({v_chord})
 - Keep each bar musically cohesive and make phrase continuity across bars
 - For each bar, use 4 to 8 notes
+- Rhythm should be simple and straight (minimal syncopation)
+- Allowed starts: 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5
+- Allowed durations only: 0.5, 1, 2
 - All notes must fit within 0 <= start < 4 and end by beat 4
 - Articulation timing must be note-local:
   - bend.start and bend.end are offsets within note duration
@@ -199,14 +186,14 @@ Global constraints:
 
 Return this exact JSON shape:
 {{
-  "key": "A",
+  "key": "{payload.key}",
   "flavor": "{payload.flavor}",
   "tempo": {payload.tempo},
   "bars": [
     {{
-      "key": "A",
+      "key": "{payload.key}",
       "degree": "I",
-      "chord": "A7",
+      "chord": "{i_chord}",
       "flavor": "{payload.flavor}",
       "tempo": {payload.tempo},
       "timeSignature": "4/4",

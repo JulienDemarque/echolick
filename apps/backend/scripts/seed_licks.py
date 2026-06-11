@@ -92,6 +92,7 @@ def run_seed(*, source: str, tempo: int, clear_existing: bool, policies: list[Po
     for form in forms:
         form_id = form["id"]
         form_slug = form["slug"]
+        form_key = form.get("key_root", "A")
         bars = _fetch_form_bars(form_id)
         if not bars:
             print(f"Skipping {form_slug}: no bars found.")
@@ -107,7 +108,7 @@ def run_seed(*, source: str, tempo: int, clear_existing: bool, policies: list[Po
 
             for policy in policies:
                 payload = GenerateLickRequest(
-                    key="A",
+                    key=form_key,
                     degree=degree,
                     chord=chord,
                     flavor=_flavor_for_policy(policy),

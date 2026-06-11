@@ -18,6 +18,7 @@ Use this file as the shared handoff anchor between chat threads.
 - [ ] CHUNK-05: Implement roadmap Phase 5 (play chord + generated lick together)
 - [ ] CHUNK-06: Implement roadmap Phase 6 (major/minor toggle wired end-to-end)
 - [ ] CHUNK-07: Implement roadmap Phase 7 (musicality constraints and prompt tuning)
+- [ ] CHUNK-CLEANUP-01: Frontend cleanup pass (remove dead API client paths, split `App.tsx`, simplify types/state)
 
 ## Session Handoff Log
 
@@ -760,3 +761,125 @@ Copy this template for each chunk update:
   - Rebuild backend and rerun lick seed script using new `SUPABASE_API_KEY` env value.
 - Risks/blockers:
   - If provided Supabase API key lacks required privileges, writes may still fail despite successful client auth.
+
+### 2026-06-11 21:50 - CHUNK-KEY-RHYTHM-A
+- Status: done
+- Completed:
+  - Fixed key-awareness end-to-end for generation/playback flow so selected form key is sent to backend instead of hardcoded `A`.
+  - Removed A-locked chord playback assumptions in frontend by deriving chord voicings from chord symbols (for example `E7`, `A7`, `B7`).
+  - Filtered stale library rows whose stored generated key does not match active form key to avoid wrong-key auto-hydration.
+  - Updated backend models/prompts/chorus validation to support all chromatic keys and dynamic I/IV/V dominant chord mapping.
+  - Tightened rhythm constraints for generated licks to straight values only (`start` on 0.5-beat grid; `duration` in `{0.5, 1, 2}`).
+  - Updated fallback and seed generation to follow chord/form key context instead of fixed A-shape notes.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `apps/frontend/src/api/client.ts`
+  - `apps/backend/app/models.py`
+  - `apps/backend/app/services/generator.py`
+  - `apps/backend/app/services/prompt.py`
+  - `apps/backend/app/services/fallback_licks.py`
+  - `apps/backend/scripts/seed_licks.py`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-KEY-RHYTHM-B: regenerate Supabase library rows per form key (clear + reseed) so DB-backed practice has consistent in-key content for all forms.
+- Risks/blockers:
+  - Existing Supabase seeded rows may still contain older A-centric content until reseeded; runtime filtering now skips obvious key mismatches.
+
+### 2026-06-11 23:48 - CHUNK-PERMUTATION-UX-A
+- Status: done
+- Completed:
+  - Removed frontend dependency on generation/library endpoints for lick creation and switched to local permutation-based lick simulation.
+  - Replaced old endpoint action controls with ear-training controls:
+    - `Hear Next`
+    - `Hear Selected Bar`
+    - `Hear Again`
+  - Added generator level selector with preset degree pools:
+    - Level 1: `1,3,5`
+    - Level 2: `1,2,3,5,6`
+    - Level 3: `1,2,b3,3,4,b5,5,6,b7`
+  - Added clickable degree pool toggles (relative to song key) for custom note inclusion.
+  - Added optional bend toggle with constrained "sensible" behavior (`b3` bent toward `3`, max one bend/bar, duration guard).
+  - Kept existing metronome, playback, and pitch scoring pipeline intact while using locally generated licks.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `apps/frontend/src/api/client.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-PERMUTATION-UX-B: add adaptive drill progression (auto-unlock levels/degrees based on score consistency) and persist user settings/progress.
+- Risks/blockers:
+  - Local generator currently prioritizes simple contour continuity; it is pedagogical-first and not yet a stylistic blues phrase engine.
+
+### 2026-06-12 00:54 - CHUNK-BLUES-FORMS-CONFIG-A
+- Status: done
+- Completed:
+  - Added selectable blues form presets for local generation:
+    - all dominant
+    - all minor
+    - minor with major IV (dorian color)
+    - minor with dominant V
+    - "Same Old Blues" turnaround variant
+  - Added side configuration panel for:
+    - song key context source
+    - blues form selection
+    - level selection
+    - degree pool toggles
+    - major-note inclusion toggle
+    - bend toggle
+  - Updated local generation defaults to minor pentatonic-first across forms; major extension notes (`2, 3, 6`) are only addable on major-blues forms.
+  - Added quarter-bend behavior on `b3` (toward `3`) with max one bend per bar.
+  - Kept metronome/mic/scoring flow unchanged while using updated chord context per selected blues form.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-BLUES-FORMS-CONFIG-B: add per-form progression presets persisted per user session and tighten generated phrase targets for non-I/IV/V turnaround bars.
+- Risks/blockers:
+  - "Same Old Blues" currently uses simplified local chord labels for ear training and not a strict transcription of every canonical variation.
+
+### 2026-06-12 01:08 - CHUNK-UX-KEY-FORM-SIMPLIFY-A
+- Status: done
+- Completed:
+  - Simplified configuration model to two independent controls:
+    - `Key` selector (chromatic root)
+    - `Blues Form` selector
+  - Removed confusing coupling to fetched "song key context" form records that could contradict selected blues form.
+  - Updated local chord-grid generation to use selected key + selected blues form only.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-BLUES-FORMS-CONFIG-B: expose quick preset buttons for common practice combos (for example `E + all-dominant`, `A + all-minor`) and persist last selection.
+- Risks/blockers:
+  - Backend form records are now intentionally unused in frontend local-generation mode; remove unused API client paths during cleanup chunk.
+
+### 2026-06-12 01:12 - CHUNK-UX-GRID-LAYOUT-A
+- Status: done
+- Completed:
+  - Increased main app container width to improve progression grid density.
+  - Updated progression bar grid layout to 4 columns on medium+ screens so 12 bars render as 3 rows x 4 bars.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-BLUES-FORMS-CONFIG-B: expose quick preset buttons and persist last key/form selection.
+- Risks/blockers:
+  - On very narrow mobile widths, grid still collapses to fewer columns by design.
+
+### 2026-06-12 01:16 - CHUNK-CLEANUP-01A-APP-SPLIT
+- Status: done
+- Completed:
+  - Split large frontend page logic by extracting pure generation/theory helpers from `App.tsx` into:
+    - `apps/frontend/src/features/practice/musicGenerator.ts`
+    - `apps/frontend/src/features/practice/pitchUtils.ts`
+  - Moved blues form definitions, degree pools, permutation generation, and chord resolution into dedicated module.
+  - Moved pitch contour + pitch detection utilities into dedicated module.
+  - Reduced `App.tsx` to focus on orchestration/UI state and event handlers.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/features/practice/pitchUtils.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-CLEANUP-01B: split `App.tsx` UI sections into reusable components (`ProgressionCard`, `ConfigurationCard`, `MetronomeCard`, `TimelineCard`) to further reduce page complexity.
+- Risks/blockers:
+  - No functional change intended; module boundaries are currently utility-focused and can be refined during component extraction.
