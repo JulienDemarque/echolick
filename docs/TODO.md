@@ -940,3 +940,59 @@ Copy this template for each chunk update:
   - CHUNK-CLEANUP-01C: extract mic/metronome/pitch-capture runtime logic into a dedicated hook (`usePracticeAudioCapture`) to shrink `App.tsx` further.
 - Risks/blockers:
   - `ArrowLeft`/`ArrowRight` currently navigate selection only; if you want them to also trigger playback/generation, that can be added in a follow-up UX pass.
+
+### 2026-06-12 01:34 - CHUNK-CLEANUP-STATE-ZUSTAND-A
+- Status: done
+- Completed:
+  - Migrated practice configuration state from local `App.tsx` state to Zustand store:
+    - `activeKeyRoot`
+    - `bluesFormId`
+    - `generatorLevel`
+    - `enabledDegrees`
+    - `includeMajorNotes`
+    - `allowBend`
+  - Added typed setters for the above fields in `useAppStore`.
+  - Kept audio/mic runtime and playback scheduling state local to avoid unnecessary global rerenders.
+- Files changed:
+  - `apps/frontend/src/store/useAppStore.ts`
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-CLEANUP-STATE-ZUSTAND-B: move generated practice data (`generatedLickByBar`) into Zustand and add a focused action API for generation/reset flows.
+- Risks/blockers:
+  - `toggleDegree` now derives next value from current store-selected `enabledDegrees`; behavior remains the same but should be sanity-tested with rapid toggles.
+
+### 2026-06-12 01:37 - CHUNK-CLEANUP-STATE-ZUSTAND-B
+- Status: done
+- Completed:
+  - Migrated generated practice data map (`generatedLickByBar`) from local `App.tsx` state into Zustand.
+  - Added focused store actions:
+    - `setGeneratedLickForBar(barIndex, lick)`
+    - `clearGeneratedLicks()`
+  - Rewired generation and reset flows in `App.tsx` to use store actions (including key/form reset paths).
+- Files changed:
+  - `apps/frontend/src/store/useAppStore.ts`
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-CLEANUP-01C: extract mic/metronome/pitch-capture runtime logic into a dedicated hook (`usePracticeAudioCapture`) to shrink `App.tsx` further.
+- Risks/blockers:
+  - `generatedLickByBar` updates now pass through Zustand object spreads per bar update; fine for current scale, but could be normalized or indexed differently if bar count expands significantly.
+
+### 2026-06-12 01:49 - CHUNK-UX-OCTAVE-SPAN-A
+- Status: done
+- Completed:
+  - Added configurable octave span control (`1 octave max` or `2 octaves max`) to practice configuration.
+  - Migrated octave span setting into Zustand (`octaveSpan`, `setOctaveSpan`) to keep generation config centralized.
+  - Enforced span limit directly in local lick generation by constraining candidate note selection so generated lick note range stays within selected 12 or 24 semitones.
+  - Wired config changes to reset generated lick cache and bar position for consistent behavior.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/features/practice/components/ConfigurationCard.tsx`
+  - `apps/frontend/src/store/useAppStore.ts`
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-ARTICULATION-BEND-A: expand bend logic to support full-step bends on selected degrees (for example `b3` and `5`) with style-aware constraints.
+- Risks/blockers:
+  - Span enforcement currently caps overall lick pitch range; it does not yet model string/fret position ergonomics for guitar fingering realism.

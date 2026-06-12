@@ -8,6 +8,7 @@ type ChordQuality = 'dominant7' | 'minor7' | 'major7' | 'dim7'
 export type GeneratorLevelId = 'level-1' | 'level-2' | 'level-3'
 export type DegreeOptionId = '1' | '2' | 'b3' | '3' | '4' | 'b5' | '5' | '6' | 'b7'
 export type BluesFormId = 'all-dominant' | 'all-minor' | 'minor-iv-major' | 'minor-v-dominant' | 'same-old-blues'
+export type OctaveSpanId = 1 | 2
 
 const NOTE_SET = new Set<string>(NOTE_ORDER)
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
@@ -229,6 +230,7 @@ export const createPermutationLick = ({
   level,
   enabledDegrees,
   includeBend,
+  octaveSpan,
 }: {
   keyRoot: NoteName
   chordSymbol: string
@@ -238,6 +240,7 @@ export const createPermutationLick = ({
   level: GeneratorLevelId
   enabledDegrees: DegreeOptionId[]
   includeBend: boolean
+  octaveSpan: OctaveSpanId
 }): GenerateLickResponse => {
   const effectiveDegrees = enabledDegrees.length > 0 ? enabledDegrees : DEGREE_LEVEL_PRESETS[level]
   const durations = buildRhythmPattern(LEVEL_DURATIONS[level])
@@ -253,11 +256,25 @@ export const createPermutationLick = ({
 
   let cursor = 0
   let previousMidi = chordRootMidi
+  const spanLimit = octaveSpan * 12
+  let lickMinMidi: number | null = null
+  let lickMaxMidi: number | null = null
   targetDegrees.forEach((degreeId, index) => {
     const duration = durations[index] ?? 1
     const candidates = buildDegreeMidiCandidates(keyRoot, degreeId)
-    const midi = candidates.length > 0 ? chooseClosestMidi(candidates, previousMidi) : previousMidi
+    const constrainedCandidates =
+      lickMinMidi === null || lickMaxMidi === null
+        ? candidates
+        : candidates.filter((candidate) => {
+            const nextMin = Math.min(lickMinMidi, candidate)
+            const nextMax = Math.max(lickMaxMidi, candidate)
+            return nextMax - nextMin <= spanLimit
+          })
+    const candidatePool = constrainedCandidates.length > 0 ? constrainedCandidates : candidates
+    const midi = candidatePool.length > 0 ? chooseClosestMidi(candidatePool, previousMidi) : previousMidi
     previousMidi = midi
+    lickMinMidi = lickMinMidi === null ? midi : Math.min(lickMinMidi, midi)
+    lickMaxMidi = lickMaxMidi === null ? midi : Math.max(lickMaxMidi, midi)
     notes.push({
       midi,
       noteName: midiToNoteNameWithOctave(midi),

@@ -6,6 +6,7 @@ import {
   type DegreeOptionId,
   type GeneratorLevelId,
   type NoteName,
+  type OctaveSpanId,
 } from '../musicGenerator'
 
 type ConfigurationCardProps = {
@@ -21,6 +22,8 @@ type ConfigurationCardProps = {
   isMajorBlues: boolean
   allowBend: boolean
   onAllowBendChange: (checked: boolean) => void
+  octaveSpan: OctaveSpanId
+  onOctaveSpanChange: (span: OctaveSpanId) => void
   enabledDegrees: DegreeOptionId[]
   isMajorExtensionDegree: (degreeId: DegreeOptionId) => boolean
   onToggleDegree: (degreeId: DegreeOptionId) => void
@@ -40,6 +43,8 @@ export function ConfigurationCard({
   isMajorBlues,
   allowBend,
   onAllowBendChange,
+  octaveSpan,
+  onOctaveSpanChange,
   enabledDegrees,
   isMajorExtensionDegree,
   onToggleDegree,
@@ -108,6 +113,17 @@ export function ConfigurationCard({
           className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
         />
         Include quarter bend on b3 (max one per bar)
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-zinc-300">
+        <span className="font-medium text-zinc-200">Octave Span</span>
+        <select
+          value={octaveSpan}
+          onChange={(event) => onOctaveSpanChange(Number(event.target.value) as OctaveSpanId)}
+          className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
+        >
+          <option value={1}>1 octave max</option>
+          <option value={2}>2 octaves max</option>
+        </select>
       </label>
       <div className="space-y-2">
         <p className="text-xs font-medium text-zinc-200">Degree Pool (relative to song key)</p>

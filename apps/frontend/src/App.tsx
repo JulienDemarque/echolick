@@ -8,7 +8,6 @@ import { SelectedLickCard } from './features/practice/components/SelectedLickCar
 import { TimelineCard } from './features/practice/components/TimelineCard'
 import {
   BLUES_FORM_MAP,
-  DEGREE_LEVEL_PRESETS,
   NOTE_ORDER,
   buildBarContextFromForm,
   buildRecommendedDegreePool,
@@ -20,7 +19,7 @@ import {
   type BluesFormId,
   type DegreeOptionId,
   type GeneratorLevelId,
-  type NoteName,
+  type OctaveSpanId,
 } from './features/practice/musicGenerator'
 import {
   MAX_CAPTURE_BEATS,
@@ -46,17 +45,27 @@ type UserPitchFeedbackPoint = PitchPoint & {
 function App() {
   const barIndex = useAppStore((state) => state.barIndex)
   const setBarIndex = useAppStore((state) => state.setBarIndex)
+  const activeKeyRoot = useAppStore((state) => state.activeKeyRoot)
+  const setActiveKeyRoot = useAppStore((state) => state.setActiveKeyRoot)
+  const bluesFormId = useAppStore((state) => state.bluesFormId)
+  const setBluesFormId = useAppStore((state) => state.setBluesFormId)
+  const generatorLevel = useAppStore((state) => state.generatorLevel)
+  const setGeneratorLevel = useAppStore((state) => state.setGeneratorLevel)
+  const enabledDegrees = useAppStore((state) => state.enabledDegrees)
+  const setEnabledDegrees = useAppStore((state) => state.setEnabledDegrees)
+  const includeMajorNotes = useAppStore((state) => state.includeMajorNotes)
+  const setIncludeMajorNotes = useAppStore((state) => state.setIncludeMajorNotes)
+  const allowBend = useAppStore((state) => state.allowBend)
+  const setAllowBend = useAppStore((state) => state.setAllowBend)
+  const octaveSpan = useAppStore((state) => state.octaveSpan)
+  const setOctaveSpan = useAppStore((state) => state.setOctaveSpan)
+  const generatedLickByBar = useAppStore((state) => state.generatedLickByBar)
+  const setGeneratedLickForBar = useAppStore((state) => state.setGeneratedLickForBar)
+  const clearGeneratedLicks = useAppStore((state) => state.clearGeneratedLicks)
 
   const [audioError, setAudioError] = useState<string>('')
-  const [generatedLickByBar, setGeneratedLickByBar] = useState<Record<number, GenerateLickResponse>>({})
-  const [activeKeyRoot, setActiveKeyRoot] = useState<NoteName>('E')
   const [activeBeat, setActiveBeat] = useState<number | null>(null)
   const [practicePhase, setPracticePhase] = useState<PracticePhase>('idle')
-  const [bluesFormId, setBluesFormId] = useState<BluesFormId>('all-dominant')
-  const [generatorLevel, setGeneratorLevel] = useState<GeneratorLevelId>('level-1')
-  const [enabledDegrees, setEnabledDegrees] = useState<DegreeOptionId[]>(DEGREE_LEVEL_PRESETS['level-1'])
-  const [includeMajorNotes, setIncludeMajorNotes] = useState<boolean>(true)
-  const [allowBend, setAllowBend] = useState<boolean>(false)
   const [micStatus, setMicStatus] = useState<MicStatus>('off')
   const [micError, setMicError] = useState<string>('')
   const [userPitchPoints, setUserPitchPoints] = useState<PitchPoint[]>([])
@@ -417,7 +426,7 @@ function App() {
     setIncludeMajorNotes(nextForm.isMajorBlues)
     setEnabledDegrees(buildRecommendedDegreePool(generatorLevel, nextForm.isMajorBlues, nextForm.isMajorBlues))
     setAllowBend(false)
-    setGeneratedLickByBar({})
+    clearGeneratedLicks()
     setBarIndex(0)
   }
 
@@ -439,14 +448,13 @@ function App() {
     if (!isMajorBlues && isMajorExtensionDegree(degreeId)) {
       return
     }
-    setEnabledDegrees((prev) => {
-      const isEnabled = prev.includes(degreeId)
-      if (isEnabled) {
-        if (prev.length === 1) return prev
-        return prev.filter((degree) => degree !== degreeId)
-      }
-      return [...prev, degreeId]
-    })
+    const isEnabled = enabledDegrees.includes(degreeId)
+    if (isEnabled) {
+      if (enabledDegrees.length === 1) return
+      setEnabledDegrees(enabledDegrees.filter((degree) => degree !== degreeId))
+      return
+    }
+    setEnabledDegrees([...enabledDegrees, degreeId])
   }
 
   const generateForBar = useCallback(
@@ -465,8 +473,9 @@ function App() {
         level: generatorLevel,
         enabledDegrees,
         includeBend: allowBend && enabledDegrees.includes('b3'),
+        octaveSpan,
       })
-      setGeneratedLickByBar((prev) => ({ ...prev, [targetBar]: generated }))
+      setGeneratedLickForBar(targetBar, generated)
       startPracticeCycleRef.current(generated.tempo)
       void playLickOverChord({
         tempo: generated.tempo,
@@ -484,6 +493,8 @@ function App() {
       effectiveIncludeMajorNotes,
       enabledDegrees,
       generatorLevel,
+      octaveSpan,
+      setGeneratedLickForBar,
     ],
   )
 
@@ -612,7 +623,7 @@ function App() {
             activeKeyRoot={activeKeyRoot}
             onKeyChange={(nextKey) => {
               setActiveKeyRoot(nextKey)
-              setGeneratedLickByBar({})
+              clearGeneratedLicks()
               setBarIndex(0)
             }}
             bluesFormId={bluesFormId}
@@ -625,6 +636,12 @@ function App() {
             isMajorBlues={isMajorBlues}
             allowBend={allowBend}
             onAllowBendChange={setAllowBend}
+            octaveSpan={octaveSpan}
+            onOctaveSpanChange={(span: OctaveSpanId) => {
+              setOctaveSpan(span)
+              clearGeneratedLicks()
+              setBarIndex(0)
+            }}
             enabledDegrees={enabledDegrees}
             isMajorExtensionDegree={isMajorExtensionDegree}
             onToggleDegree={toggleDegree}
