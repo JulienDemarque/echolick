@@ -13,6 +13,30 @@ export type OctaveSpanId = 1 | 2
 const NOTE_SET = new Set<string>(NOTE_ORDER)
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 const MAJOR_EXTENSION_DEGREES: DegreeOptionId[] = ['2', '3', '6']
+const ROOT_SCALE_WEIGHTS: Record<'major' | 'minor', Record<DegreeOptionId, number>> = {
+  major: {
+    '1': 1.55,
+    '2': 1.08,
+    b3: 0.9,
+    '3': 1.28,
+    '4': 1.0,
+    b5: 0.82,
+    '5': 1.42,
+    '6': 1.16,
+    b7: 1.18,
+  },
+  minor: {
+    '1': 1.55,
+    '2': 1.02,
+    b3: 1.36,
+    '3': 0.74,
+    '4': 1.14,
+    b5: 1.02,
+    '5': 1.4,
+    '6': 1.2,
+    b7: 1.26,
+  },
+}
 
 export const DEGREE_OPTIONS: Array<{ id: DegreeOptionId; label: string; semitones: number }> = [
   { id: '1', label: '1 (do)', semitones: 0 },
@@ -139,6 +163,19 @@ const midiToNoteNameWithOctave = (midi: number): string => {
   return `${NOTE_NAMES[pitchClass] ?? 'C'}${octave}`
 }
 const pickRandom = <T,>(items: T[]): T => items[Math.floor(Math.random() * items.length)]
+const pickWeightedRandom = <T,>(items: Array<{ value: T; weight: number }>): T => {
+  const totalWeight = items.reduce((sum, item) => sum + Math.max(0, item.weight), 0)
+  if (totalWeight <= 0) {
+    return items[Math.floor(Math.random() * items.length)]!.value
+  }
+  let cursor = Math.random() * totalWeight
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i]!
+    cursor -= Math.max(0, item.weight)
+    if (cursor <= 0) return item.value
+  }
+  return items[items.length - 1]!.value
+}
 
 const buildDegreeMidiCandidates = (keyRoot: NoteName, degreeId: DegreeOptionId): number[] => {
   const rootMidi = 60 + NOTE_ORDER.indexOf(keyRoot)
@@ -150,10 +187,122 @@ const buildDegreeMidiCandidates = (keyRoot: NoteName, degreeId: DegreeOptionId):
   return candidates.filter((midi) => midi >= 50 && midi <= 82)
 }
 
+const constrainCandidatesToSpan = (candidates: number[], minMidi: number, maxMidi: number, spanLimit: number): number[] =>
+  candidates.filter((candidate) => {
+    const nextMin = Math.min(minMidi, candidate)
+    const nextMax = Math.max(maxMidi, candidate)
+    return nextMax - nextMin <= spanLimit
+  })
+
 const chooseClosestMidi = (candidates: number[], targetMidi: number): number =>
   candidates.reduce((best, candidate) =>
     Math.abs(candidate - targetMidi) < Math.abs(best - targetMidi) ? candidate : best,
   )
+
+const chooseClosestAboveMidi = (candidates: number[], fromMidi: number, maxDelta: number): number | null => {
+  const above = candidates
+    .filter((candidate) => candidate > fromMidi + 1e-6 && candidate - fromMidi <= maxDelta + 1e-6)
+    .sort((a, b) => a - b)
+  if (above.length > 0) return above[0]!
+  return null
+}
+
+const chooseClosestBelowMidi = (candidates: number[], fromMidi: number, maxDelta: number): number | null => {
+  const below = candidates
+    .filter((candidate) => candidate < fromMidi - 1e-6 && fromMidi - candidate <= maxDelta + 1e-6)
+    .sort((a, b) => b - a)
+  if (below.length > 0) return below[0]!
+  return null
+}
+
+const resolveChordQuality = (chordSymbol: string): ChordQuality => {
+  const upper = chordSymbol.trim().toUpperCase()
+  if (upper.includes('DIM7')) return 'dim7'
+  if (upper.includes('MAJ7')) return 'major7'
+  if (upper.includes('M7')) return 'minor7'
+  return 'dominant7'
+}
+
+const resolveChordTonePitchClasses = (chordSymbol: string): Set<number> => {
+  const root = chordRootFromSymbol(chordSymbol) ?? 'A'
+  const rootMidi = 60 + NOTE_ORDER.indexOf(root)
+  const quality = resolveChordQuality(chordSymbol)
+  const qualityIntervals =
+    quality === 'dim7'
+      ? [0, 3, 6, 9]
+      : quality === 'major7'
+        ? [0, 4, 7, 11]
+        : quality === 'minor7'
+          ? [0, 3, 7, 10]
+          : [0, 4, 7, 10]
+  return new Set(qualityIntervals.map((interval) => midiToPitchClass(rootMidi + interval)))
+}
+
+const isStrongBeat = (beatStart: number): boolean => {
+  const rounded = Math.round(beatStart)
+  const closeToGrid = Math.abs(beatStart - rounded) < 0.001
+  return closeToGrid && (rounded === 0 || rounded === 2)
+}
+
+const scoreDegreeCandidate = ({
+  nearestMidi,
+  previousMidi,
+  previousDirection,
+  isChordTone,
+  onStrongBeat,
+  previousDegree,
+  degreeId,
+  chordQuality,
+  intervalFromChordRoot,
+  rootScaleWeight,
+}: {
+  nearestMidi: number
+  previousMidi: number
+  previousDirection: -1 | 0 | 1
+  isChordTone: boolean
+  onStrongBeat: boolean
+  previousDegree: DegreeOptionId | null
+  degreeId: DegreeOptionId
+  chordQuality: ChordQuality
+  intervalFromChordRoot: number
+  rootScaleWeight: number
+}): number => {
+  const delta = nearestMidi - previousMidi
+  const distance = Math.abs(delta)
+  const candidateDirection: -1 | 0 | 1 = delta > 0 ? 1 : delta < 0 ? -1 : 0
+  const movementWeight = distance <= 2 ? 2.35 : distance <= 4 ? 1.75 : distance <= 7 ? 1.08 : 0.56
+  const directionWeight =
+    previousDirection === 0 || candidateDirection === 0
+      ? candidateDirection === 0
+        ? 0.86
+        : 1
+      : previousDirection === candidateDirection
+        ? distance <= 3
+          ? 1.24
+          : 0.92
+        : distance <= 2
+          ? 1.08
+          : 0.78
+  const chordToneWeight = isChordTone ? (onStrongBeat ? 2.3 : 1.55) : onStrongBeat ? 0.66 : 1.0
+  const repeatPenalty = previousDegree === degreeId ? 0.82 : 1
+  const avoidWeight =
+    chordQuality === 'minor7' && intervalFromChordRoot === 4
+      ? 0.08
+      : chordQuality === 'dominant7' && intervalFromChordRoot === 11
+        ? 0.35
+        : chordQuality === 'major7' && intervalFromChordRoot === 10
+          ? 0.45
+          : chordQuality === 'dim7' && intervalFromChordRoot === 7
+            ? 0.6
+            : 1
+  const colorWeight =
+    chordQuality === 'minor7' && intervalFromChordRoot === 9
+      ? 1.32
+      : chordQuality === 'dominant7' && (intervalFromChordRoot === 3 || intervalFromChordRoot === 6)
+        ? 1.15
+        : 1
+  return movementWeight * directionWeight * chordToneWeight * repeatPenalty * avoidWeight * colorWeight * rootScaleWeight
+}
 
 const buildRhythmPattern = (allowedDurations: number[]): number[] => {
   const durations: number[] = []
@@ -246,33 +395,64 @@ export const createPermutationLick = ({
   const durations = buildRhythmPattern(LEVEL_DURATIONS[level])
   const notes: GenerateLickResponse['notes'] = []
   const chordRootMidi = resolveChordMidi(chordSymbol)[0] ?? 60
+  const chordRootPitchClass = midiToPitchClass(chordRootMidi)
+  const chordQuality = resolveChordQuality(chordSymbol)
+  const chordTonePitchClasses = resolveChordTonePitchClasses(chordSymbol)
 
-  const sequence: DegreeOptionId[] = []
-  while (sequence.length < durations.length) {
-    const shuffled = [...effectiveDegrees].sort(() => Math.random() - 0.5)
-    sequence.push(...shuffled)
-  }
-  const targetDegrees = sequence.slice(0, durations.length)
+  const targetDegrees: DegreeOptionId[] = []
 
   let cursor = 0
   let previousMidi = chordRootMidi
+  let previousDirection: -1 | 0 | 1 = 0
+  let previousDegree: DegreeOptionId | null = null
   const spanLimit = octaveSpan * 12
   let lickMinMidi: number | null = null
   let lickMaxMidi: number | null = null
-  targetDegrees.forEach((degreeId, index) => {
-    const duration = durations[index] ?? 1
+  durations.forEach((duration) => {
+    const onStrongBeat = isStrongBeat(cursor)
+    const weightedDegrees = effectiveDegrees.map((degreeId) => {
+      const candidates = buildDegreeMidiCandidates(keyRoot, degreeId)
+      const constrainedCandidates =
+        lickMinMidi === null || lickMaxMidi === null
+          ? candidates
+          : constrainCandidatesToSpan(candidates, lickMinMidi, lickMaxMidi, spanLimit)
+      const candidatePool = constrainedCandidates.length > 0 ? constrainedCandidates : candidates
+      const nearestMidi =
+        candidatePool.length > 0
+          ? chooseClosestMidi(candidatePool, previousMidi)
+          : candidates.length > 0
+            ? chooseClosestMidi(candidates, previousMidi)
+            : previousMidi
+      const candidateIsChordTone = chordTonePitchClasses.has(midiToPitchClass(nearestMidi))
+      const intervalFromChordRoot = (midiToPitchClass(nearestMidi) - chordRootPitchClass + 12) % 12
+      const weight = scoreDegreeCandidate({
+        nearestMidi,
+        previousMidi,
+        previousDirection,
+        isChordTone: candidateIsChordTone,
+        onStrongBeat,
+        previousDegree,
+        degreeId,
+        chordQuality,
+        intervalFromChordRoot,
+        rootScaleWeight: ROOT_SCALE_WEIGHTS[flavor][degreeId],
+      })
+      return { value: degreeId, weight }
+    })
+
+    const degreeId = pickWeightedRandom(weightedDegrees)
+    targetDegrees.push(degreeId)
     const candidates = buildDegreeMidiCandidates(keyRoot, degreeId)
     const constrainedCandidates =
       lickMinMidi === null || lickMaxMidi === null
         ? candidates
-        : candidates.filter((candidate) => {
-            const nextMin = Math.min(lickMinMidi, candidate)
-            const nextMax = Math.max(lickMaxMidi, candidate)
-            return nextMax - nextMin <= spanLimit
-          })
+        : constrainCandidatesToSpan(candidates, lickMinMidi, lickMaxMidi, spanLimit)
     const candidatePool = constrainedCandidates.length > 0 ? constrainedCandidates : candidates
     const midi = candidatePool.length > 0 ? chooseClosestMidi(candidatePool, previousMidi) : previousMidi
+    const delta = midi - previousMidi
+    previousDirection = delta > 0 ? 1 : delta < 0 ? -1 : 0
     previousMidi = midi
+    previousDegree = degreeId
     lickMinMidi = lickMinMidi === null ? midi : Math.min(lickMinMidi, midi)
     lickMaxMidi = lickMaxMidi === null ? midi : Math.max(lickMaxMidi, midi)
     notes.push({
@@ -288,20 +468,93 @@ export const createPermutationLick = ({
     cursor += duration
   })
 
-  if (includeBend && effectiveDegrees.includes('b3') && effectiveDegrees.includes('3')) {
-    const candidateIndexes = notes
-      .map((note, index) => ({ note, index }))
-      .filter((entry, index) => targetDegrees[index] === 'b3' && entry.note.duration >= 1)
-      .map((entry) => entry.index)
-    if (candidateIndexes.length > 0) {
-      const targetIndex = pickRandom(candidateIndexes)
-      const targetNote = notes[targetIndex]
-      const bendTargetMidi = targetNote.midi + 0.5
-      targetNote.technique = 'bend'
-      targetNote.bend = {
-        toMidi: bendTargetMidi,
-        start: 0.12,
-        end: Math.min(0.65, Math.max(0.35, targetNote.duration - 0.15)),
+  if (includeBend) {
+    const bendRules: Array<{ from: DegreeOptionId; to: DegreeOptionId; weight: number; minDuration: number; maxDelta: number }> = [
+      { from: '4', to: '5', weight: 1.5, minDuration: 1, maxDelta: 2.5 },
+      { from: 'b7', to: '1', weight: 1.35, minDuration: 1, maxDelta: 2.5 },
+      { from: 'b3', to: '3', weight: 1.15, minDuration: 1, maxDelta: 1.5 },
+      { from: 'b5', to: '5', weight: 0.8, minDuration: 0.5, maxDelta: 1.5 },
+    ]
+    const preBendReleaseRules: Array<{
+      target: DegreeOptionId
+      preBendFrom: DegreeOptionId
+      weight: number
+      minDuration: number
+      maxDelta: number
+    }> = [
+      { target: '4', preBendFrom: '5', weight: 1.2, minDuration: 1, maxDelta: 2.5 },
+      { target: 'b7', preBendFrom: '1', weight: 1.05, minDuration: 1, maxDelta: 2.5 },
+      { target: 'b3', preBendFrom: '3', weight: 0.9, minDuration: 1, maxDelta: 1.5 },
+    ]
+    const bendCandidates: Array<{
+      noteIndex: number
+      fromMidi?: number
+      toMidi: number
+      weight: number
+      mode: 'bend_up' | 'prebend_release'
+    }> = []
+    notes.forEach((note, index) => {
+      const degreeId = targetDegrees[index]
+      if (!degreeId) return
+      const matchingBendRule = bendRules.find(
+        (rule) =>
+          rule.from === degreeId &&
+          note.duration >= rule.minDuration &&
+          effectiveDegrees.includes(rule.from) &&
+          effectiveDegrees.includes(rule.to),
+      )
+      if (matchingBendRule) {
+        const targetCandidates = buildDegreeMidiCandidates(keyRoot, matchingBendRule.to)
+        const toMidi = chooseClosestAboveMidi(targetCandidates, note.midi, matchingBendRule.maxDelta)
+        if (toMidi !== null) {
+          const beatBias = isStrongBeat(note.start) ? 1.12 : 1
+          bendCandidates.push({
+            noteIndex: index,
+            toMidi,
+            weight: matchingBendRule.weight * beatBias,
+            mode: 'bend_up',
+          })
+        }
+      }
+      const matchingPreBendRule = preBendReleaseRules.find(
+        (rule) =>
+          rule.target === degreeId &&
+          note.duration >= rule.minDuration &&
+          effectiveDegrees.includes(rule.target) &&
+          effectiveDegrees.includes(rule.preBendFrom),
+      )
+      if (matchingPreBendRule) {
+        const preBendCandidates = buildDegreeMidiCandidates(keyRoot, matchingPreBendRule.preBendFrom)
+        const fromMidi = chooseClosestAboveMidi(preBendCandidates, note.midi, matchingPreBendRule.maxDelta)
+        if (fromMidi !== null) {
+          const releaseTargetMidi = chooseClosestBelowMidi([note.midi], fromMidi, matchingPreBendRule.maxDelta)
+          if (releaseTargetMidi !== null) {
+            const beatBias = isStrongBeat(note.start) ? 1.08 : 1
+            bendCandidates.push({
+              noteIndex: index,
+              fromMidi,
+              toMidi: releaseTargetMidi,
+              weight: matchingPreBendRule.weight * beatBias,
+              mode: 'prebend_release',
+            })
+          }
+        }
+      }
+    })
+    if (bendCandidates.length > 0) {
+      const chosenCandidate = pickWeightedRandom(bendCandidates.map((candidate) => ({ value: candidate, weight: candidate.weight })))
+      const targetNote = notes[chosenCandidate.noteIndex]
+      if (targetNote) {
+        if (chosenCandidate.mode === 'prebend_release' && chosenCandidate.fromMidi !== undefined) {
+          targetNote.midi = chosenCandidate.fromMidi
+          targetNote.noteName = midiToNoteNameWithOctave(chosenCandidate.fromMidi)
+        }
+        targetNote.technique = 'bend'
+        targetNote.bend = {
+          toMidi: chosenCandidate.toMidi,
+          start: chosenCandidate.mode === 'prebend_release' ? 0.02 : 0.12,
+          end: Math.min(0.82, Math.max(0.32, targetNote.duration - 0.1)),
+        }
       }
     }
   }

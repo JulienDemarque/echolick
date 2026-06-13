@@ -2,6 +2,7 @@ import type { LickNote } from '../types/music'
 
 let sharedAudioContext: AudioContext | null = null
 let springImpulseCache: AudioBuffer | null = null
+const activePlaybackStops: Array<() => void> = []
 
 const midiToFreq = (midi: number): number => 440 * 2 ** ((midi - 69) / 12)
 
@@ -52,6 +53,7 @@ const makeSpringImpulse = (ctx: AudioContext): AudioBuffer => {
 }
 
 type MixBuses = {
+  master: GainNode
   rhythmInput: GainNode
   leadInput: GainNode
 }
@@ -157,7 +159,7 @@ const createMixBuses = (ctx: AudioContext, startTime: number): MixBuses => {
 
   leadOutLevel.connect(master)
 
-  return { rhythmInput, leadInput }
+  return { master, rhythmInput, leadInput }
 }
 
 const playChord = (
@@ -271,9 +273,35 @@ export const playLickOverChord = async ({
   const barDurationSec = beatSeconds * 4
   const start = ctx.currentTime + 0.06
   const mix = createMixBuses(ctx, start)
+  const playbackTailSec = barDurationSec + 1.4
+  let released = false
+  const release = () => {
+    if (released) return
+    released = true
+    const now = ctx.currentTime
+    mix.master.gain.cancelScheduledValues(now)
+    mix.master.gain.setValueAtTime(Math.max(0.0001, mix.master.gain.value), now)
+    mix.master.gain.exponentialRampToValueAtTime(0.0001, now + 0.03)
+    const disconnectDelayMs = 90
+    globalThis.setTimeout(() => {
+      mix.master.disconnect()
+    }, disconnectDelayMs)
+  }
+  activePlaybackStops.push(release)
+  globalThis.setTimeout(() => {
+    release()
+    const index = activePlaybackStops.indexOf(release)
+    if (index >= 0) activePlaybackStops.splice(index, 1)
+  }, Math.max(150, Math.round(playbackTailSec * 1000)))
 
   playChord(ctx, start, barDurationSec, chordMidi, mix.rhythmInput)
   notes.forEach((note) =>
     playLeadNote(ctx, note, start, beatSeconds, mix.leadInput),
   )
+}
+
+export const stopLickPlayback = () => {
+  const stops = [...activePlaybackStops]
+  activePlaybackStops.length = 0
+  stops.forEach((stop) => stop())
 }

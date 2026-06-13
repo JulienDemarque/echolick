@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type GenerateLickResponse } from './api/client'
-import { playLickOverChord } from './audio/bluesPrototype'
+import { playLickOverChord, stopLickPlayback } from './audio/bluesPrototype'
 import { ConfigurationCard } from './features/practice/components/ConfigurationCard'
 import { MetronomeCard } from './features/practice/components/MetronomeCard'
 import { ProgressionCard } from './features/practice/components/ProgressionCard'
@@ -86,6 +86,7 @@ function App() {
   const generateForBarRef = useRef<(targetBar: number) => void>(() => {})
   const safeBarIndexRef = useRef<number>(0)
   const barCountRef = useRef<number>(0)
+  const isPlaybackRunningRef = useRef<boolean>(false)
 
   const selectedBluesForm = BLUES_FORM_MAP[bluesFormId]
   const isMajorBlues = selectedBluesForm.isMajorBlues
@@ -170,7 +171,7 @@ function App() {
     })
   }, [flattenedTargetContour, userPitchPoints])
 
-  const stopPitchCaptureLoop = () => {
+  const stopPitchCaptureLoop = useCallback(() => {
     if (pitchCaptureRafRef.current !== null) {
       window.cancelAnimationFrame(pitchCaptureRafRef.current)
       pitchCaptureRafRef.current = null
@@ -178,7 +179,7 @@ function App() {
     captureWindowStartMsRef.current = null
     smoothedMidiRef.current = null
     setMicStatus(micAnalyserRef.current ? 'ready' : 'off')
-  }
+  }, [])
 
   const ensureMetronomeAudioContext = () => {
     if (!metronomeAudioContextRef.current) {
@@ -312,18 +313,21 @@ function App() {
     }
   }
 
-  const clearMetronome = () => {
+  const clearMetronome = useCallback(() => {
     metronomeTimeoutsRef.current.forEach((timeoutId) => {
       window.clearTimeout(timeoutId)
     })
     metronomeTimeoutsRef.current = []
+    isPlaybackRunningRef.current = false
+    stopLickPlayback()
     stopPitchCaptureLoop()
     setActiveBeat(null)
     setPracticePhase('idle')
-  }
+  }, [stopPitchCaptureLoop])
 
   const startPracticeCycle = (tempo: number) => {
     clearMetronome()
+    isPlaybackRunningRef.current = true
     setUserPitchPoints([])
     const beatMs = (60 / tempo) * 1000
     const totalBeats = 8
@@ -348,6 +352,7 @@ function App() {
     metronomeTimeoutsRef.current.push(captureStopId)
 
     const doneId = window.setTimeout(() => {
+      isPlaybackRunningRef.current = false
       setActiveBeat(null)
       setPracticePhase('idle')
       metronomeTimeoutsRef.current = []
@@ -364,6 +369,7 @@ function App() {
         window.clearTimeout(timeoutId)
       })
       metronomeTimeoutsRef.current = []
+      stopLickPlayback()
       stopPitchCaptureLoop()
       micSourceRef.current?.disconnect()
       micAnalyserRef.current?.disconnect()
@@ -381,7 +387,7 @@ function App() {
       }
       metronomeAudioContextRef.current = null
     },
-    [],
+    [stopPitchCaptureLoop],
   )
 
   const pitchRange = useMemo(() => {
@@ -540,6 +546,10 @@ function App() {
       if (event.code === 'Space') {
         if (isGeneratingRef.current) return
         event.preventDefault()
+        if (isPlaybackRunningRef.current) {
+          clearMetronome()
+          return
+        }
         const lick = selectedLickRef.current
         if (lick) {
           setAudioError('')
@@ -577,7 +587,7 @@ function App() {
     return () => {
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [setBarIndex])
+  }, [clearMetronome, setBarIndex])
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-8">

@@ -996,3 +996,68 @@ Copy this template for each chunk update:
   - CHUNK-ARTICULATION-BEND-A: expand bend logic to support full-step bends on selected degrees (for example `b3` and `5`) with style-aware constraints.
 - Risks/blockers:
   - Span enforcement currently caps overall lick pitch range; it does not yet model string/fret position ergonomics for guitar fingering realism.
+
+### 2026-06-12 09:58 - CHUNK-GEN-WEIGHTED-MELODY-A
+- Status: done
+- Completed:
+  - Added weighted degree-selection logic in local lick generation to improve phrase musicality.
+  - Introduced harmonic weighting:
+    - Prefer chord tones on strong beats (1 and 3).
+    - Reduce non-chord-tone probability on strong beats while still allowing movement tones.
+  - Introduced melodic-motion weighting:
+    - Favor stepwise/nearby movement relative to previous note.
+    - Penalize immediate repeated-degree selections slightly to avoid static loops.
+  - Kept octave-span constraints intact so weighted picks still respect selected 1- or 2-octave limits.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-ARTICULATION-BEND-A: expand bend logic to support full-step bends on selected degrees (for example `b3` and `5`) with style-aware constraints.
+- Risks/blockers:
+  - Weight constants are heuristic defaults; they should be tuned by ear (and optionally exposed as presets) after user play-testing.
+
+### 2026-06-13 11:58 - CHUNK-GEN-WEIGHTED-MELODY-B
+- Status: done
+- Completed:
+  - Upgraded local lick note scoring to include direction-aware melodic motion, favoring stepwise travel and coherent contour relative to the previous note.
+  - Added chord-quality-aware note weighting with explicit avoid-tone penalties (for example major third over minor7) and chord-tone emphasis on strong beats.
+  - Added root-scale weighting per flavor (`major`/`minor`) so note choices better reflect tonic context while still adapting to current chord function.
+  - Expanded bend articulation logic to musically targeted bend patterns (`4->5`, `b7->1`, `b3->3`, `b5->5`) with duration and pitch-range guards.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-GEN-WEIGHTED-MELODY-C: expose/tune weighting presets (for example "conservative", "bluesy", "outside") and audition generated output by ear for each blues form.
+- Risks/blockers:
+  - New weighting and bend heuristics are musically stronger but still hand-tuned constants; final feel may require iterative ear-based calibration.
+
+### 2026-06-13 12:02 - CHUNK-ARTICULATION-BEND-B
+- Status: done
+- Completed:
+  - Added pre-bend release support in local lick generation by introducing bend candidates that start from a higher target and release down to the selected note.
+  - Added musically guided pre-bend release patterns (`5->4`, `1->b7`, `3->b3`) with timing and interval guards.
+  - Kept existing upward bend patterns and now choose between bend-up vs pre-bend-release candidates using weighted selection.
+  - Updated note start pitch + note name when a pre-bend release is selected so playback/timeline represent the articulation correctly.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-ARTICULATION-BEND-C: add articulation controls/presets to bias bend-up vs pre-bend-release usage and tune probabilities by generator level.
+- Risks/blockers:
+  - Pre-bend release currently assumes nearby scalar upper targets and does not yet model string/fret ergonomics for instrument-realistic execution.
+
+### 2026-06-13 12:09 - CHUNK-PLAYBACK-INTERRUPT-A
+- Status: done
+- Completed:
+  - Added explicit global playback stop support in frontend audio layer (`stopLickPlayback`) by tracking active playback buses and fading/disconnecting them on stop.
+  - Wired practice cycle cleanup to always stop active lick audio, preventing overlap when restarting playback.
+  - Updated keyboard spacebar behavior to toggle playback: if a cycle is currently running, pressing space now interrupts instead of layering another playback.
+  - Kept metronome + capture loop reset aligned with audio interruption so visual/audio state stays in sync.
+- Files changed:
+  - `apps/frontend/src/audio/bluesPrototype.ts`
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-PLAYBACK-INTERRUPT-B: mirror the same play/stop toggle behavior in the `Play` button UI label/state so keyboard and button controls are consistent.
+- Risks/blockers:
+  - Audio stop currently fades quickly (~30ms) to avoid clicks; very abrupt stop preferences would require a configurable fade profile.
