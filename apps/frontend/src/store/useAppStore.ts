@@ -27,6 +27,8 @@ type AppState = {
   setIncludeMajorNotes: (value: boolean) => void
   allowBend: boolean
   setAllowBend: (value: boolean) => void
+  includeChordTones: boolean
+  setIncludeChordTones: (value: boolean) => void
   octaveSpan: OctaveSpanId
   setOctaveSpan: (value: OctaveSpanId) => void
   generatedLickByBar: Record<number, GenerateLickResponse>
@@ -51,6 +53,8 @@ export const useAppStore = create<AppState>((set) => ({
   setIncludeMajorNotes: (value) => set({ includeMajorNotes: value }),
   allowBend: false,
   setAllowBend: (value) => set({ allowBend: value }),
+  includeChordTones: true,
+  setIncludeChordTones: (value) => set({ includeChordTones: value }),
   octaveSpan: 1,
   setOctaveSpan: (value) => set({ octaveSpan: value }),
   generatedLickByBar: {},

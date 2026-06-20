@@ -1061,3 +1061,54 @@ Copy this template for each chunk update:
   - CHUNK-PLAYBACK-INTERRUPT-B: mirror the same play/stop toggle behavior in the `Play` button UI label/state so keyboard and button controls are consistent.
 - Risks/blockers:
   - Audio stop currently fades quickly (~30ms) to avoid clicks; very abrupt stop preferences would require a configurable fade profile.
+
+### 2026-06-13 12:36 - CHUNK-UX-AUTO-ECHO-LOOP-A
+- Status: done
+- Completed:
+  - Reworked practice flow to a single start/stop auto-loop model instead of requiring repeated keyboard replay.
+  - Added score-gated progression logic: current bar repeats until user reaches `100%`, then automatically advances to the next bar.
+  - Added chorus wrap behavior: when auto-loop advances from last bar to bar 1, cached licks are cleared and new licks are generated for the new pass.
+  - Updated progression controls and shortcut messaging to reflect auto-loop UX (`Start`/`Stop`, `Space` start/stop loop).
+  - Ensured manual bar navigation/next actions stop auto-loop first to avoid conflicting playback state.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `apps/frontend/src/features/practice/components/ProgressionCard.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-UX-AUTO-ECHO-LOOP-B: add explicit bar status badges for loop mode (for example `pending`, `passed`, `repeating`) and chorus counter in UI.
+- Risks/blockers:
+  - `100%` threshold uses existing forgiving scorer, so progression strictness depends on current tolerance constants.
+
+### 2026-06-13 12:56 - CHUNK-UX-FRETBOARD-VIS-A
+- Status: done
+- Completed:
+  - Added initial fretboard visualization component (`FretboardMap`) showing 6 strings across frets `0-12`.
+  - Mapped displayed notes relative to selected key and current enabled degree pool from configuration state.
+  - Highlighted enabled degrees on the board and visually distinguished root tones from other enabled tones.
+  - Added fret position markers (for example `3`, `5`, `7`, `9`, `12`) to improve orientation for upcoming blues-box overlays.
+- Files changed:
+  - `apps/frontend/src/features/practice/components/FretboardMap.tsx`
+  - `apps/frontend/src/features/practice/components/ConfigurationCard.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-UX-FRETBOARD-INTERACT-A: make fretboard notes clickable to toggle enabled notes directly from positions and use this as primary note-pool control.
+- Risks/blockers:
+  - Current view is read-only preview; it does not yet enforce string/fret position constraints in lick generation.
+
+### 2026-06-13 13:47 - CHUNK-GEN-CHORD-TONE-OPTION-A
+- Status: done
+- Completed:
+  - Added a new frontend generation option `Add current chord tones as targets` in the configuration panel.
+  - Wired new state through Zustand (`includeChordTones`) and passed it into local lick generation.
+  - Extended melody target selection to optionally inject chord-tone MIDI candidates from the active chord (including tones outside selected degree pool) with movement-aware weighting.
+  - Kept existing degree-based weighting and bend logic intact while allowing mixed degree/chord-tone target selection.
+- Files changed:
+  - `apps/frontend/src/store/useAppStore.ts`
+  - `apps/frontend/src/features/practice/components/ConfigurationCard.tsx`
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-UX-FRETBOARD-INTERACT-A: make fretboard map interactive and add optional overlay for per-chord-tone highlighting per selected bar.
+- Risks/blockers:
+  - Chord-tone injection currently works at pitch-selection level and is not yet constrained by explicit fret/string position policies.

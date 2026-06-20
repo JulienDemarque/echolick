@@ -12,9 +12,10 @@ type ProgressionCardProps = {
   activeBars: FormBarResponse[]
   lickByBar: Record<number, GenerateLickResponse>
   onSelectBar: (index: number) => void
-  onPlay: () => void
+  onStartStopAuto: () => void
   onHearNext: () => void
   isGenerating: boolean
+  isAutoPracticeActive: boolean
   hasSelectedLick: boolean
   requestError: string
 }
@@ -29,9 +30,10 @@ export function ProgressionCard({
   activeBars,
   lickByBar,
   onSelectBar,
-  onPlay,
+  onStartStopAuto,
   onHearNext,
   isGenerating,
+  isAutoPracticeActive,
   hasSelectedLick,
   requestError,
 }: ProgressionCardProps) {
@@ -80,20 +82,20 @@ export function ProgressionCard({
         })}
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button onClick={onPlay} disabled={isGenerating}>
-          Play
+        <Button onClick={onStartStopAuto} disabled={isGenerating}>
+          {isAutoPracticeActive ? 'Stop' : 'Start'}
         </Button>
         <Button onClick={onHearNext} variant="primary" disabled={isGenerating}>
           Next
         </Button>
         <span className="self-center text-xs text-zinc-400">
-          Tip: <kbd className="rounded border border-zinc-700 px-1 py-0.5 text-[10px]">Space</kbd> play/replay,{' '}
+          Tip: <kbd className="rounded border border-zinc-700 px-1 py-0.5 text-[10px]">Space</kbd> start/stop auto loop,{' '}
           <kbd className="rounded border border-zinc-700 px-1 py-0.5 text-[10px]">←</kbd>/
           <kbd className="rounded border border-zinc-700 px-1 py-0.5 text-[10px]">→</kbd> select bars.
         </span>
       </div>
       {!hasSelectedLick ? (
-        <p className="text-xs text-zinc-500">No lick for this bar yet. Click Play to generate one.</p>
+        <p className="text-xs text-zinc-500">No lick for this bar yet. Click Start to begin looping practice.</p>
       ) : null}
       {requestError ? <p className="text-sm text-red-400">{requestError}</p> : null}
     </Card>

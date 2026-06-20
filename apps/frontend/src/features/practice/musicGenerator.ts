@@ -227,15 +227,22 @@ const resolveChordTonePitchClasses = (chordSymbol: string): Set<number> => {
   const root = chordRootFromSymbol(chordSymbol) ?? 'A'
   const rootMidi = 60 + NOTE_ORDER.indexOf(root)
   const quality = resolveChordQuality(chordSymbol)
-  const qualityIntervals =
-    quality === 'dim7'
-      ? [0, 3, 6, 9]
-      : quality === 'major7'
-        ? [0, 4, 7, 11]
-        : quality === 'minor7'
-          ? [0, 3, 7, 10]
-          : [0, 4, 7, 10]
+  const qualityIntervals = quality === 'dim7' ? [0, 3, 6, 9] : quality === 'major7' ? [0, 4, 7, 11] : quality === 'minor7' ? [0, 3, 7, 10] : [0, 4, 7, 10]
   return new Set(qualityIntervals.map((interval) => midiToPitchClass(rootMidi + interval)))
+}
+
+const buildChordToneMidiCandidates = (chordSymbol: string): number[] => {
+  const root = chordRootFromSymbol(chordSymbol) ?? 'A'
+  const rootMidi = 60 + NOTE_ORDER.indexOf(root)
+  const quality = resolveChordQuality(chordSymbol)
+  const intervals = quality === 'dim7' ? [0, 3, 6, 9] : quality === 'major7' ? [0, 4, 7, 11] : quality === 'minor7' ? [0, 3, 7, 10] : [0, 4, 7, 10]
+  const candidates: number[] = []
+  for (let octave = -1; octave <= 1; octave += 1) {
+    intervals.forEach((interval) => {
+      candidates.push(rootMidi + interval + octave * 12)
+    })
+  }
+  return candidates.filter((midi) => midi >= 50 && midi <= 82)
 }
 
 const isStrongBeat = (beatStart: number): boolean => {
@@ -302,6 +309,37 @@ const scoreDegreeCandidate = ({
         ? 1.15
         : 1
   return movementWeight * directionWeight * chordToneWeight * repeatPenalty * avoidWeight * colorWeight * rootScaleWeight
+}
+
+const scoreChordToneCandidate = ({
+  nearestMidi,
+  previousMidi,
+  previousDirection,
+  onStrongBeat,
+}: {
+  nearestMidi: number
+  previousMidi: number
+  previousDirection: -1 | 0 | 1
+  onStrongBeat: boolean
+}): number => {
+  const delta = nearestMidi - previousMidi
+  const distance = Math.abs(delta)
+  const candidateDirection: -1 | 0 | 1 = delta > 0 ? 1 : delta < 0 ? -1 : 0
+  const movementWeight = distance <= 2 ? 2.1 : distance <= 4 ? 1.6 : distance <= 7 ? 1.02 : 0.54
+  const directionWeight =
+    previousDirection === 0 || candidateDirection === 0
+      ? candidateDirection === 0
+        ? 0.9
+        : 1
+      : previousDirection === candidateDirection
+        ? distance <= 3
+          ? 1.18
+          : 0.9
+        : distance <= 2
+          ? 1.06
+          : 0.76
+  const chordToneWeight = onStrongBeat ? 2.45 : 1.85
+  return movementWeight * directionWeight * chordToneWeight
 }
 
 const buildRhythmPattern = (allowedDurations: number[]): number[] => {
@@ -379,6 +417,7 @@ export const createPermutationLick = ({
   level,
   enabledDegrees,
   includeBend,
+  includeChordTones,
   octaveSpan,
 }: {
   keyRoot: NoteName
@@ -389,6 +428,7 @@ export const createPermutationLick = ({
   level: GeneratorLevelId
   enabledDegrees: DegreeOptionId[]
   includeBend: boolean
+  includeChordTones: boolean
   octaveSpan: OctaveSpanId
 }): GenerateLickResponse => {
   const effectiveDegrees = enabledDegrees.length > 0 ? enabledDegrees : DEGREE_LEVEL_PRESETS[level]
@@ -398,8 +438,10 @@ export const createPermutationLick = ({
   const chordRootPitchClass = midiToPitchClass(chordRootMidi)
   const chordQuality = resolveChordQuality(chordSymbol)
   const chordTonePitchClasses = resolveChordTonePitchClasses(chordSymbol)
+  const chordToneMidiCandidates = includeChordTones ? buildChordToneMidiCandidates(chordSymbol) : []
 
-  const targetDegrees: DegreeOptionId[] = []
+  const targetDegrees: Array<DegreeOptionId | null> = []
+  type MelodicTarget = { kind: 'degree'; degreeId: DegreeOptionId } | { kind: 'chordTone'; midi: number }
 
   let cursor = 0
   let previousMidi = chordRootMidi
@@ -410,7 +452,9 @@ export const createPermutationLick = ({
   let lickMaxMidi: number | null = null
   durations.forEach((duration) => {
     const onStrongBeat = isStrongBeat(cursor)
-    const weightedDegrees = effectiveDegrees.map((degreeId) => {
+    const weightedTargets: Array<{ value: MelodicTarget; weight: number }> = []
+
+    effectiveDegrees.forEach((degreeId) => {
       const candidates = buildDegreeMidiCandidates(keyRoot, degreeId)
       const constrainedCandidates =
         lickMinMidi === null || lickMaxMidi === null
@@ -437,18 +481,48 @@ export const createPermutationLick = ({
         intervalFromChordRoot,
         rootScaleWeight: ROOT_SCALE_WEIGHTS[flavor][degreeId],
       })
-      return { value: degreeId, weight }
+      weightedTargets.push({ value: { kind: 'degree', degreeId }, weight })
     })
 
-    const degreeId = pickWeightedRandom(weightedDegrees)
+    if (chordToneMidiCandidates.length > 0) {
+      const constrainedChordTones =
+        lickMinMidi === null || lickMaxMidi === null
+          ? chordToneMidiCandidates
+          : constrainCandidatesToSpan(chordToneMidiCandidates, lickMinMidi, lickMaxMidi, spanLimit)
+      const chordPool = constrainedChordTones.length > 0 ? constrainedChordTones : chordToneMidiCandidates
+      const nearestByPitchClass = new Map<number, number>()
+      chordPool.forEach((candidate) => {
+        const pitchClass = midiToPitchClass(candidate)
+        const existing = nearestByPitchClass.get(pitchClass)
+        if (existing === undefined || Math.abs(candidate - previousMidi) < Math.abs(existing - previousMidi)) {
+          nearestByPitchClass.set(pitchClass, candidate)
+        }
+      })
+      nearestByPitchClass.forEach((nearestMidi) => {
+        weightedTargets.push({
+          value: { kind: 'chordTone', midi: nearestMidi },
+          weight: scoreChordToneCandidate({
+            nearestMidi,
+            previousMidi,
+            previousDirection,
+            onStrongBeat,
+          }),
+        })
+      })
+    }
+
+    const selectedTarget = pickWeightedRandom<MelodicTarget>(weightedTargets)
+    const degreeId = selectedTarget.kind === 'degree' ? selectedTarget.degreeId : null
     targetDegrees.push(degreeId)
-    const candidates = buildDegreeMidiCandidates(keyRoot, degreeId)
-    const constrainedCandidates =
-      lickMinMidi === null || lickMaxMidi === null
-        ? candidates
-        : constrainCandidatesToSpan(candidates, lickMinMidi, lickMaxMidi, spanLimit)
-    const candidatePool = constrainedCandidates.length > 0 ? constrainedCandidates : candidates
-    const midi = candidatePool.length > 0 ? chooseClosestMidi(candidatePool, previousMidi) : previousMidi
+    const midi = selectedTarget.kind === 'degree' ? (() => {
+      const candidates = buildDegreeMidiCandidates(keyRoot, selectedTarget.degreeId)
+      const constrainedCandidates =
+        lickMinMidi === null || lickMaxMidi === null
+          ? candidates
+          : constrainCandidatesToSpan(candidates, lickMinMidi, lickMaxMidi, spanLimit)
+      const candidatePool = constrainedCandidates.length > 0 ? constrainedCandidates : candidates
+      return candidatePool.length > 0 ? chooseClosestMidi(candidatePool, previousMidi) : previousMidi
+    })() : selectedTarget.midi
     const delta = midi - previousMidi
     previousDirection = delta > 0 ? 1 : delta < 0 ? -1 : 0
     previousMidi = midi

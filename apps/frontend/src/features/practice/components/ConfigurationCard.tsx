@@ -1,4 +1,5 @@
 import { Card, CardTitle } from '../../../components/ui/card'
+import { FretboardMap } from './FretboardMap'
 import {
   BLUES_FORM_OPTIONS,
   DEGREE_OPTIONS,
@@ -22,6 +23,8 @@ type ConfigurationCardProps = {
   isMajorBlues: boolean
   allowBend: boolean
   onAllowBendChange: (checked: boolean) => void
+  includeChordTones: boolean
+  onIncludeChordTonesChange: (checked: boolean) => void
   octaveSpan: OctaveSpanId
   onOctaveSpanChange: (span: OctaveSpanId) => void
   enabledDegrees: DegreeOptionId[]
@@ -43,6 +46,8 @@ export function ConfigurationCard({
   isMajorBlues,
   allowBend,
   onAllowBendChange,
+  includeChordTones,
+  onIncludeChordTonesChange,
   octaveSpan,
   onOctaveSpanChange,
   enabledDegrees,
@@ -114,6 +119,16 @@ export function ConfigurationCard({
         />
         Include quarter bend on b3 (max one per bar)
       </label>
+      <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={includeChordTones}
+          onChange={(event) => onIncludeChordTonesChange(event.target.checked)}
+          className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+        />
+        Add current chord tones as targets
+      </label>
+      <FretboardMap activeKeyRoot={activeKeyRoot} enabledDegrees={enabledDegrees} noteOrder={noteOrder} />
       <label className="flex flex-col gap-1 text-xs text-zinc-300">
         <span className="font-medium text-zinc-200">Octave Span</span>
         <select

@@ -57,6 +57,8 @@ function App() {
   const setIncludeMajorNotes = useAppStore((state) => state.setIncludeMajorNotes)
   const allowBend = useAppStore((state) => state.allowBend)
   const setAllowBend = useAppStore((state) => state.setAllowBend)
+  const includeChordTones = useAppStore((state) => state.includeChordTones)
+  const setIncludeChordTones = useAppStore((state) => state.setIncludeChordTones)
   const octaveSpan = useAppStore((state) => state.octaveSpan)
   const setOctaveSpan = useAppStore((state) => state.setOctaveSpan)
   const generatedLickByBar = useAppStore((state) => state.generatedLickByBar)
@@ -80,13 +82,15 @@ function App() {
   const smoothedMidiRef = useRef<number | null>(null)
   const pitchCaptureRafRef = useRef<number | null>(null)
   const metronomeAudioContextRef = useRef<AudioContext | null>(null)
-  const selectedLickRef = useRef<GenerateLickResponse | null>(null)
   const isGeneratingRef = useRef<boolean>(false)
-  const startPracticeCycleRef = useRef<(tempo: number) => void>(() => {})
-  const generateForBarRef = useRef<(targetBar: number) => void>(() => {})
+  const startPracticeCycleRef = useRef<(tempo: number, onComplete?: () => void) => void>(() => {})
+  const runAutoPracticeBarRef = useRef<(targetBar: number, forceNewLick?: boolean) => void>(() => {})
   const safeBarIndexRef = useRef<number>(0)
   const barCountRef = useRef<number>(0)
   const isPlaybackRunningRef = useRef<boolean>(false)
+  const scoreRef = useRef<{ total: number; matched: number; percentage: number }>({ total: 0, matched: 0, percentage: 0 })
+  const isAutoPracticeActiveRef = useRef<boolean>(false)
+  const [isAutoPracticeActive, setIsAutoPracticeActive] = useState(false)
 
   const selectedBluesForm = BLUES_FORM_MAP[bluesFormId]
   const isMajorBlues = selectedBluesForm.isMajorBlues
@@ -325,7 +329,7 @@ function App() {
     setPracticePhase('idle')
   }, [stopPitchCaptureLoop])
 
-  const startPracticeCycle = (tempo: number) => {
+  const startPracticeCycle = (tempo: number, onComplete?: () => void) => {
     clearMetronome()
     isPlaybackRunningRef.current = true
     setUserPitchPoints([])
@@ -356,6 +360,11 @@ function App() {
       setActiveBeat(null)
       setPracticePhase('idle')
       metronomeTimeoutsRef.current = []
+      if (onComplete) {
+        window.setTimeout(() => {
+          onComplete()
+        }, 60)
+      }
     }, PLAYBACK_START_DELAY_MS + totalBeats * beatMs)
     metronomeTimeoutsRef.current.push(doneId)
   }
@@ -409,12 +418,12 @@ function App() {
   const isGenerating = false
 
   useEffect(() => {
-    selectedLickRef.current = selectedLick
-  }, [selectedLick])
-
-  useEffect(() => {
     isGeneratingRef.current = isGenerating
   }, [isGenerating])
+
+  useEffect(() => {
+    scoreRef.current = score
+  }, [score])
 
   useEffect(() => {
     safeBarIndexRef.current = safeBarIndex
@@ -427,6 +436,7 @@ function App() {
   const effectiveIncludeMajorNotes = isMajorBlues && includeMajorNotes
 
   const onBluesFormChange = (nextFormId: BluesFormId) => {
+    stopAutoPractice()
     const nextForm = BLUES_FORM_MAP[nextFormId]
     setBluesFormId(nextFormId)
     setIncludeMajorNotes(nextForm.isMajorBlues)
@@ -437,6 +447,7 @@ function App() {
   }
 
   const onGeneratorLevelChange = (level: GeneratorLevelId) => {
+    stopAutoPractice()
     setGeneratorLevel(level)
     setEnabledDegrees(buildRecommendedDegreePool(level, isMajorBlues, effectiveIncludeMajorNotes))
     if (level === 'level-1') {
@@ -446,11 +457,13 @@ function App() {
 
   const onIncludeMajorNotesChange = (checked: boolean) => {
     if (!isMajorBlues) return
+    stopAutoPractice()
     setIncludeMajorNotes(checked)
     setEnabledDegrees(buildRecommendedDegreePool(generatorLevel, true, checked))
   }
 
   const toggleDegree = (degreeId: DegreeOptionId) => {
+    stopAutoPractice()
     if (!isMajorBlues && isMajorExtensionDegree(degreeId)) {
       return
     }
@@ -463,13 +476,11 @@ function App() {
     setEnabledDegrees([...enabledDegrees, degreeId])
   }
 
-  const generateForBar = useCallback(
-    (targetBar: number) => {
+  const buildLickForBar = useCallback(
+    (targetBar: number): GenerateLickResponse => {
       const context = activeBars[targetBar] ?? buildBarContextFromForm(targetBar, activeKeyRoot, bluesFormId)
       const degree = resolvePracticeDegreeFromLabel(context.degree)
       const chord = context.chord_symbol
-
-      setAudioError('')
       const generated = createPermutationLick({
         keyRoot: activeKeyRoot,
         chordSymbol: chord,
@@ -479,17 +490,11 @@ function App() {
         level: generatorLevel,
         enabledDegrees,
         includeBend: allowBend && enabledDegrees.includes('b3'),
+        includeChordTones,
         octaveSpan,
       })
       setGeneratedLickForBar(targetBar, generated)
-      startPracticeCycleRef.current(generated.tempo)
-      void playLickOverChord({
-        tempo: generated.tempo,
-        chordMidi: resolveChordMidi(generated.chord),
-        notes: normalizeLickNotes(generated.notes),
-      }).catch((e) => {
-        setAudioError(e instanceof Error ? e.message : 'Failed to play generated lick')
-      })
+      return generated
     },
     [
       activeBars,
@@ -499,41 +504,94 @@ function App() {
       effectiveIncludeMajorNotes,
       enabledDegrees,
       generatorLevel,
+      includeChordTones,
       octaveSpan,
       setGeneratedLickForBar,
     ],
   )
 
-  const goToNextBarAndGenerate = () => {
-    const nextIndex = (safeBarIndex + 1) % Math.max(barCount, 1)
-    setBarIndex(nextIndex)
-    generateForBar(nextIndex)
-  }
+  const playLick = useCallback(
+    (lick: GenerateLickResponse, onCycleComplete?: () => void) => {
+      setAudioError('')
+      startPracticeCycleRef.current(lick.tempo, onCycleComplete)
+      void playLickOverChord({
+        tempo: lick.tempo,
+        chordMidi: resolveChordMidi(lick.chord),
+        notes: normalizeLickNotes(lick.notes),
+      }).catch((e) => {
+        setAudioError(e instanceof Error ? e.message : 'Failed to play generated lick')
+      })
+    },
+    [],
+  )
 
-  const replaySelectedBar = () => {
-    if (!selectedLick) return
-    setAudioError('')
-    startPracticeCycle(selectedLick.tempo)
-    void playLickOverChord({
-      tempo: selectedLick.tempo,
-      chordMidi: resolveChordMidi(selectedLick.chord),
-      notes: normalizeLickNotes(selectedLick.notes),
-    }).catch((e) => {
-      setAudioError(e instanceof Error ? e.message : 'Failed to replay selected bar lick')
-    })
-  }
+  const playBar = useCallback(
+    (targetBar: number, options?: { forceNewLick?: boolean; onCycleComplete?: () => void }) => {
+      const forceNewLick = options?.forceNewLick ?? false
+      const onCycleComplete = options?.onCycleComplete
+      const existing = generatedLickByBar[targetBar]
+      const lick = !forceNewLick && existing ? existing : buildLickForBar(targetBar)
+      setBarIndex(targetBar)
+      playLick(lick, onCycleComplete)
+    },
+    [buildLickForBar, generatedLickByBar, playLick, setBarIndex],
+  )
 
-  const playSelectedBar = () => {
-    if (selectedLick) {
-      replaySelectedBar()
-      return
-    }
-    generateForBar(safeBarIndex)
-  }
+  const runAutoPracticeBar = useCallback(
+    (targetBar: number, forceNewLick = false) => {
+      if (!isAutoPracticeActiveRef.current) return
+      playBar(targetBar, {
+        forceNewLick,
+        onCycleComplete: () => {
+          if (!isAutoPracticeActiveRef.current) return
+          const currentScore = scoreRef.current
+          const isPerfect = currentScore.total > 0 && currentScore.percentage === 100
+          if (!isPerfect) {
+            runAutoPracticeBarRef.current(targetBar, false)
+            return
+          }
+          const totalBars = Math.max(barCountRef.current, 1)
+          const nextBar = (targetBar + 1) % totalBars
+          const wrappedChorus = nextBar === 0 && totalBars > 1
+          if (wrappedChorus) {
+            clearGeneratedLicks()
+          }
+          runAutoPracticeBarRef.current(nextBar, wrappedChorus)
+        },
+      })
+    },
+    [clearGeneratedLicks, playBar],
+  )
 
   useEffect(() => {
-    generateForBarRef.current = generateForBar
-  }, [generateForBar])
+    runAutoPracticeBarRef.current = runAutoPracticeBar
+  }, [runAutoPracticeBar])
+
+  const stopAutoPractice = useCallback(() => {
+    isAutoPracticeActiveRef.current = false
+    setIsAutoPracticeActive(false)
+    clearMetronome()
+  }, [clearMetronome])
+
+  const startAutoPractice = useCallback(() => {
+    isAutoPracticeActiveRef.current = true
+    setIsAutoPracticeActive(true)
+    runAutoPracticeBarRef.current(safeBarIndexRef.current, false)
+  }, [])
+
+  const toggleAutoPractice = useCallback(() => {
+    if (isAutoPracticeActiveRef.current) {
+      stopAutoPractice()
+      return
+    }
+    startAutoPractice()
+  }, [startAutoPractice, stopAutoPractice])
+
+  const goToNextBarAndGenerate = () => {
+    stopAutoPractice()
+    const nextIndex = (safeBarIndex + 1) % Math.max(barCount, 1)
+    playBar(nextIndex, { forceNewLick: false })
+  }
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -546,24 +604,7 @@ function App() {
       if (event.code === 'Space') {
         if (isGeneratingRef.current) return
         event.preventDefault()
-        if (isPlaybackRunningRef.current) {
-          clearMetronome()
-          return
-        }
-        const lick = selectedLickRef.current
-        if (lick) {
-          setAudioError('')
-          startPracticeCycleRef.current(lick.tempo)
-          void playLickOverChord({
-            tempo: lick.tempo,
-            chordMidi: resolveChordMidi(lick.chord),
-            notes: normalizeLickNotes(lick.notes),
-          }).catch((e) => {
-            setAudioError(e instanceof Error ? e.message : 'Failed to replay selected bar lick')
-          })
-          return
-        }
-        generateForBarRef.current(safeBarIndexRef.current)
+        toggleAutoPractice()
         return
       }
 
@@ -587,7 +628,7 @@ function App() {
     return () => {
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [clearMetronome, setBarIndex])
+  }, [setBarIndex, toggleAutoPractice])
 
   return (
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-8">
@@ -609,10 +650,14 @@ function App() {
             currentChord={currentChord}
             activeBars={activeBars}
             lickByBar={lickByBar}
-            onSelectBar={setBarIndex}
-            onPlay={playSelectedBar}
+            onSelectBar={(index) => {
+              stopAutoPractice()
+              setBarIndex(index)
+            }}
+            onStartStopAuto={toggleAutoPractice}
             onHearNext={goToNextBarAndGenerate}
             isGenerating={isGenerating}
+            isAutoPracticeActive={isAutoPracticeActive}
             hasSelectedLick={Boolean(selectedLick)}
             requestError={requestError}
           />
@@ -632,6 +677,7 @@ function App() {
           <ConfigurationCard
             activeKeyRoot={activeKeyRoot}
             onKeyChange={(nextKey) => {
+              stopAutoPractice()
               setActiveKeyRoot(nextKey)
               clearGeneratedLicks()
               setBarIndex(0)
@@ -646,8 +692,14 @@ function App() {
             isMajorBlues={isMajorBlues}
             allowBend={allowBend}
             onAllowBendChange={setAllowBend}
+            includeChordTones={includeChordTones}
+            onIncludeChordTonesChange={(checked) => {
+              stopAutoPractice()
+              setIncludeChordTones(checked)
+            }}
             octaveSpan={octaveSpan}
             onOctaveSpanChange={(span: OctaveSpanId) => {
+              stopAutoPractice()
               setOctaveSpan(span)
               clearGeneratedLicks()
               setBarIndex(0)
