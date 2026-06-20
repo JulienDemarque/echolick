@@ -4,7 +4,7 @@ Use this file as the shared handoff anchor between chat threads.
 
 ## Current Chunk
 
-- [x] CHUNK-UX-FRETBOARD-OVERLAYS-A: Add optional fretboard overlays for chord tones and active playback notes.
+- [x] CHUNK-UX-BACKGROUND-ROTATION-ASSET-UPDATE-A: Add newly created pixel-art assets to rotating top-left background list.
 
 ## Next Chunks
 
@@ -183,3 +183,44 @@ Copy this template for each chunk update:
   - Add a lightweight component test for fretboard style precedence (playing note > selected > chord tone > base).
 - Risks/blockers:
   - Playback overlay timing is synced to UI/metronome start delay; browser scheduling jitter can still make highlights slightly ahead/behind audio on slower devices.
+
+### 2026-06-20 23:45 - CHUNK-UX-BACKGROUND-ROTATION-A
+- Status: done
+- Completed:
+  - Added rotating background image support in `App.tsx` using pixel-art assets from `public`.
+  - Configured a one-minute background switch interval cycling through `tbonewalker`, `hendrix`, and `bbking`.
+  - Applied a dark gradient overlay on top of backgrounds to preserve readability of existing UI cards/text.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO2.md`
+- Next best step:
+  - Add a user-facing toggle (or settings control) for fixed vs rotating background and rotation speed.
+- Risks/blockers:
+  - Very large background images may increase first-load memory usage on lower-end devices.
+
+### 2026-06-20 23:51 - CHUNK-UX-BACKGROUND-CORNER-PLACEMENT-A
+- Status: done
+- Completed:
+  - Changed app shell background treatment from full-page image to a top-left decorative panel.
+  - Kept the same one-minute rotating image behavior and smooth transition between assets.
+  - Preserved readability by keeping main page background dark and content layered above the decorative panel.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO2.md`
+- Next best step:
+  - Add a compact control to set decorative panel size/opacity from UI preferences.
+- Risks/blockers:
+  - On very small viewports, the decorative panel may visually overlap heading area more prominently than on desktop.
+
+### 2026-06-20 23:47 - CHUNK-UX-BACKGROUND-ROTATION-ASSET-UPDATE-A
+- Status: done
+- Completed:
+  - Added `freddieking.png` to the rotating top-left decorative background assets.
+  - Kept existing one-minute rotation behavior unchanged.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO2.md`
+- Next best step:
+  - Consider sorting/curating rotation order based on visual balance across consecutive images.
+- Risks/blockers:
+  - Additional high-resolution assets can further increase memory pressure on low-end devices.

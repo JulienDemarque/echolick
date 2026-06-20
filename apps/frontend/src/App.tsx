@@ -40,6 +40,8 @@ import { useAppStore } from './store/useAppStore'
 type PracticePhase = 'idle' | 'listen' | 'your-turn'
 
 const PLAYBACK_START_DELAY_MS = 60
+const BACKGROUND_ROTATION_INTERVAL_MS = 60_000
+const BACKGROUND_IMAGES = ['/tbonewalker.png', '/hendrix.png', '/bbking.png', '/freddieking.png'] as const
 
 type MicStatus = 'off' | 'ready' | 'capturing'
 type UserPitchFeedbackPoint = PitchPoint & {
@@ -75,6 +77,7 @@ function App() {
   const [micError, setMicError] = useState<string>('')
   const [userPitchPoints, setUserPitchPoints] = useState<PitchPoint[]>([])
   const [activePlaybackMidis, setActivePlaybackMidis] = useState<number[]>([])
+  const [backgroundImageIndex, setBackgroundImageIndex] = useState(0)
   const metronomeTimeoutsRef = useRef<number[]>([])
   const playbackOverlayRafRef = useRef<number | null>(null)
   const playbackOverlayStartMsRef = useRef<number | null>(null)
@@ -451,6 +454,17 @@ function App() {
 
   const requestError = micError || audioError
   const isGenerating = false
+  const activeBackgroundImage = BACKGROUND_IMAGES[backgroundImageIndex] ?? BACKGROUND_IMAGES[0]
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setBackgroundImageIndex((current) => (current + 1) % BACKGROUND_IMAGES.length)
+    }, BACKGROUND_ROTATION_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [])
 
   useEffect(() => {
     isGeneratingRef.current = isGenerating
@@ -670,98 +684,108 @@ function App() {
   }, [setBarIndex, toggleAutoPractice])
 
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-8">
-      <div className="space-y-1">
-        <h1 className="text-3xl font-bold tracking-tight text-zinc-100">EchoLick Blues POC</h1>
-        <p className="text-sm text-zinc-400">
-          Select a bar, choose your level and box position, and hear a locally generated permutation lick.
-        </p>
-      </div>
+    <div className="relative min-h-screen overflow-hidden bg-zinc-950">
+      <div
+        className="pointer-events-none absolute left-0 top-0 h-72 w-72 bg-cover bg-center bg-no-repeat opacity-45 transition-[background-image] duration-700 ease-out sm:h-96 sm:w-96"
+        style={{
+          backgroundImage: `linear-gradient(rgba(9, 9, 11, 0.35), rgba(9, 9, 11, 0.78)), url(${activeBackgroundImage})`,
+        }}
+      />
 
-      <div className="grid items-stretch gap-4 lg:grid-cols-[1.8fr_1fr]">
-        <div className="flex h-full flex-col gap-4">
-          <ProgressionCard
-            activeKeyRoot={activeKeyRoot}
-            selectedBluesFormLabel={selectedBluesForm.label}
-            safeBarIndex={safeBarIndex}
-            barCount={barCount}
-            currentDegree={currentDegree}
-            currentChord={currentChord}
-            activeBars={activeBars}
-            lickByBar={lickByBar}
-            onSelectBar={(index) => {
-              stopAutoPractice()
-              setBarIndex(index)
-            }}
-            onStartStopAuto={toggleAutoPractice}
-            onHearNext={goToNextBarAndGenerate}
-            isGenerating={isGenerating}
-            isAutoPracticeActive={isAutoPracticeActive}
-            hasSelectedLick={Boolean(selectedLick)}
-            requestError={requestError}
-          />
+      <main className="relative z-10 mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-8">
+        <div className="space-y-1">
+          <h1 className="text-3xl font-bold tracking-tight text-zinc-100">EchoLick Blues POC</h1>
+          <p className="text-sm text-zinc-400">
+            Select a bar, choose your level and box position, and hear a locally generated permutation lick.
+          </p>
+        </div>
 
-          <div className="flex-1">
-            <MetronomeCard
-              micStatus={micStatus}
-              activeBeat={activeBeat}
-              practicePhase={practicePhase}
-              onEnableMic={() => void enableMicrophone()}
-              onDisableMic={() => void stopAndDisposeMicrophone()}
+        <div className="grid items-stretch gap-4 lg:grid-cols-[1.8fr_1fr]">
+          <div className="flex h-full flex-col gap-4">
+            <ProgressionCard
+              activeKeyRoot={activeKeyRoot}
+              selectedBluesFormLabel={selectedBluesForm.label}
+              safeBarIndex={safeBarIndex}
+              barCount={barCount}
+              currentDegree={currentDegree}
+              currentChord={currentChord}
+              activeBars={activeBars}
+              lickByBar={lickByBar}
+              onSelectBar={(index) => {
+                stopAutoPractice()
+                setBarIndex(index)
+              }}
+              onStartStopAuto={toggleAutoPractice}
+              onHearNext={goToNextBarAndGenerate}
+              isGenerating={isGenerating}
+              isAutoPracticeActive={isAutoPracticeActive}
+              hasSelectedLick={Boolean(selectedLick)}
+              requestError={requestError}
+            />
+
+            <div className="flex-1">
+              <MetronomeCard
+                micStatus={micStatus}
+                activeBeat={activeBeat}
+                practicePhase={practicePhase}
+                onEnableMic={() => void enableMicrophone()}
+                onDisableMic={() => void stopAndDisposeMicrophone()}
+              />
+            </div>
+          </div>
+
+          <div className="h-full">
+            <ConfigurationCard
+              activeKeyRoot={activeKeyRoot}
+              onKeyChange={(nextKey) => {
+                stopAutoPractice()
+                setActiveKeyRoot(nextKey)
+                setSelectedFretboardMidis([])
+                clearGeneratedLicks()
+                setBarIndex(0)
+              }}
+              bluesFormId={bluesFormId}
+              onBluesFormChange={onBluesFormChange}
+              selectedBluesFormDescription={selectedBluesForm.description}
+              generatorLevel={generatorLevel}
+              onGeneratorLevelChange={onGeneratorLevelChange}
+              selectedLevelDescription={selectedLevelDescription}
+              cagedPositionId={cagedPositionId}
+              onCagedPositionChange={(nextPosition: CagedPositionId) => {
+                stopAutoPractice()
+                setCagedPositionId(nextPosition)
+                setSelectedFretboardMidis([])
+                clearGeneratedLicks()
+                setBarIndex(0)
+              }}
+              selectedFretboardMidis={selectedFretboardMidis}
+              onToggleFretboardMidi={(midi) => {
+                stopAutoPractice()
+                toggleSelectedFretboardMidi(midi)
+              }}
+              allowedDegrees={visibleDegreesForFretboard}
+              noteOrder={NOTE_ORDER}
+              showChordTonesOnFretboard={showChordTonesOnFretboard}
+              onShowChordTonesOnFretboardChange={setShowChordTonesOnFretboard}
+              showPlayingLickOnFretboard={showPlayingLickOnFretboard}
+              onShowPlayingLickOnFretboardChange={setShowPlayingLickOnFretboard}
+              chordTonePitchClasses={currentChordTonePitchClasses}
+              playingLickMidis={activePlaybackMidis}
             />
           </div>
         </div>
 
-        <div className="h-full">
-          <ConfigurationCard
-            activeKeyRoot={activeKeyRoot}
-            onKeyChange={(nextKey) => {
-              stopAutoPractice()
-              setActiveKeyRoot(nextKey)
-              setSelectedFretboardMidis([])
-              clearGeneratedLicks()
-              setBarIndex(0)
-            }}
-            bluesFormId={bluesFormId}
-            onBluesFormChange={onBluesFormChange}
-            selectedBluesFormDescription={selectedBluesForm.description}
-            generatorLevel={generatorLevel}
-            onGeneratorLevelChange={onGeneratorLevelChange}
-            selectedLevelDescription={selectedLevelDescription}
-            cagedPositionId={cagedPositionId}
-            onCagedPositionChange={(nextPosition: CagedPositionId) => {
-              stopAutoPractice()
-              setCagedPositionId(nextPosition)
-              setSelectedFretboardMidis([])
-              clearGeneratedLicks()
-              setBarIndex(0)
-            }}
-            selectedFretboardMidis={selectedFretboardMidis}
-            onToggleFretboardMidi={(midi) => {
-              stopAutoPractice()
-              toggleSelectedFretboardMidi(midi)
-            }}
-            allowedDegrees={visibleDegreesForFretboard}
-            noteOrder={NOTE_ORDER}
-            showChordTonesOnFretboard={showChordTonesOnFretboard}
-            onShowChordTonesOnFretboardChange={setShowChordTonesOnFretboard}
-            showPlayingLickOnFretboard={showPlayingLickOnFretboard}
-            onShowPlayingLickOnFretboardChange={setShowPlayingLickOnFretboard}
-            chordTonePitchClasses={currentChordTonePitchClasses}
-            playingLickMidis={activePlaybackMidis}
-          />
-        </div>
-      </div>
-      <TimelineCard
-        score={score}
-        noteMatches={noteMatches}
-        targetPitchSegments={targetPitchSegments}
-        userPitchFeedbackPoints={userPitchFeedbackPoints}
-        pitchRange={pitchRange}
-      />
+        <TimelineCard
+          score={score}
+          noteMatches={noteMatches}
+          targetPitchSegments={targetPitchSegments}
+          userPitchFeedbackPoints={userPitchFeedbackPoints}
+          pitchRange={pitchRange}
+        />
 
-      <SelectedLickCard selectedLick={selectedLick} />
-    </main>
+        <SelectedLickCard selectedLick={selectedLick} />
+      </main>
+    </div>
   )
 }
 
