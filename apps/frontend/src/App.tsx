@@ -8,16 +8,19 @@ import { SelectedLickCard } from './features/practice/components/SelectedLickCar
 import { TimelineCard } from './features/practice/components/TimelineCard'
 import {
   BLUES_FORM_MAP,
+  GENERATOR_LEVEL_CONFIG,
+  GENERATOR_LEVEL_OPTIONS,
   NOTE_ORDER,
   buildBarContextFromForm,
-  buildRecommendedDegreePool,
+  buildFretboardVisibleDegrees,
   createPermutationLick,
-  isMajorExtensionDegree,
+  degreeIdFromMidi,
+  isDegreeAllowedForLevel,
   normalizeLickNotes,
   resolveChordMidi,
   resolvePracticeDegreeFromLabel,
   type BluesFormId,
-  type DegreeOptionId,
+  type CagedPositionId,
   type GeneratorLevelId,
   type OctaveSpanId,
 } from './features/practice/musicGenerator'
@@ -51,16 +54,13 @@ function App() {
   const setBluesFormId = useAppStore((state) => state.setBluesFormId)
   const generatorLevel = useAppStore((state) => state.generatorLevel)
   const setGeneratorLevel = useAppStore((state) => state.setGeneratorLevel)
-  const enabledDegrees = useAppStore((state) => state.enabledDegrees)
-  const setEnabledDegrees = useAppStore((state) => state.setEnabledDegrees)
-  const includeMajorNotes = useAppStore((state) => state.includeMajorNotes)
-  const setIncludeMajorNotes = useAppStore((state) => state.setIncludeMajorNotes)
-  const allowBend = useAppStore((state) => state.allowBend)
-  const setAllowBend = useAppStore((state) => state.setAllowBend)
-  const includeChordTones = useAppStore((state) => state.includeChordTones)
-  const setIncludeChordTones = useAppStore((state) => state.setIncludeChordTones)
   const octaveSpan = useAppStore((state) => state.octaveSpan)
   const setOctaveSpan = useAppStore((state) => state.setOctaveSpan)
+  const cagedPositionId = useAppStore((state) => state.cagedPositionId)
+  const setCagedPositionId = useAppStore((state) => state.setCagedPositionId)
+  const selectedFretboardMidis = useAppStore((state) => state.selectedFretboardMidis)
+  const setSelectedFretboardMidis = useAppStore((state) => state.setSelectedFretboardMidis)
+  const toggleSelectedFretboardMidi = useAppStore((state) => state.toggleSelectedFretboardMidi)
   const generatedLickByBar = useAppStore((state) => state.generatedLickByBar)
   const setGeneratedLickForBar = useAppStore((state) => state.setGeneratedLickForBar)
   const clearGeneratedLicks = useAppStore((state) => state.clearGeneratedLicks)
@@ -93,7 +93,10 @@ function App() {
   const [isAutoPracticeActive, setIsAutoPracticeActive] = useState(false)
 
   const selectedBluesForm = BLUES_FORM_MAP[bluesFormId]
-  const isMajorBlues = selectedBluesForm.isMajorBlues
+  const selectedLevelConfig = GENERATOR_LEVEL_CONFIG[generatorLevel]
+  const selectedLevelOption = GENERATOR_LEVEL_OPTIONS.find((option) => option.id === generatorLevel)
+  const allowedDegreesForLevel = selectedLevelConfig.allowedDegrees
+  const selectedLevelDescription = selectedLevelOption?.description ?? ''
   const activeBars = selectedBluesForm.bars.map((_, index) =>
     buildBarContextFromForm(index, activeKeyRoot, bluesFormId),
   )
@@ -102,6 +105,16 @@ function App() {
   const currentBarContext = activeBars[safeBarIndex] ?? buildBarContextFromForm(0, activeKeyRoot, bluesFormId)
   const currentDegree = currentBarContext.degree
   const currentChord = currentBarContext.chord_symbol
+  const visibleDegreesForFretboard = useMemo(
+    () =>
+      buildFretboardVisibleDegrees({
+        keyRoot: activeKeyRoot,
+        allowedDegrees: allowedDegreesForLevel,
+        includeChordTones: selectedLevelConfig.includeChordTones,
+        chordSymbol: currentChord,
+      }),
+    [activeKeyRoot, allowedDegreesForLevel, currentChord, selectedLevelConfig.includeChordTones],
+  )
   const lickByBar = generatedLickByBar
   const selectedLick = lickByBar[safeBarIndex] ?? null
   const selectedLickNotes = useMemo(
@@ -433,15 +446,10 @@ function App() {
     barCountRef.current = barCount
   }, [barCount])
 
-  const effectiveIncludeMajorNotes = isMajorBlues && includeMajorNotes
-
   const onBluesFormChange = (nextFormId: BluesFormId) => {
     stopAutoPractice()
-    const nextForm = BLUES_FORM_MAP[nextFormId]
     setBluesFormId(nextFormId)
-    setIncludeMajorNotes(nextForm.isMajorBlues)
-    setEnabledDegrees(buildRecommendedDegreePool(generatorLevel, nextForm.isMajorBlues, nextForm.isMajorBlues))
-    setAllowBend(false)
+    setSelectedFretboardMidis([])
     clearGeneratedLicks()
     setBarIndex(0)
   }
@@ -449,31 +457,14 @@ function App() {
   const onGeneratorLevelChange = (level: GeneratorLevelId) => {
     stopAutoPractice()
     setGeneratorLevel(level)
-    setEnabledDegrees(buildRecommendedDegreePool(level, isMajorBlues, effectiveIncludeMajorNotes))
-    if (level === 'level-1') {
-      setAllowBend(false)
-    }
-  }
-
-  const onIncludeMajorNotesChange = (checked: boolean) => {
-    if (!isMajorBlues) return
-    stopAutoPractice()
-    setIncludeMajorNotes(checked)
-    setEnabledDegrees(buildRecommendedDegreePool(generatorLevel, true, checked))
-  }
-
-  const toggleDegree = (degreeId: DegreeOptionId) => {
-    stopAutoPractice()
-    if (!isMajorBlues && isMajorExtensionDegree(degreeId)) {
-      return
-    }
-    const isEnabled = enabledDegrees.includes(degreeId)
-    if (isEnabled) {
-      if (enabledDegrees.length === 1) return
-      setEnabledDegrees(enabledDegrees.filter((degree) => degree !== degreeId))
-      return
-    }
-    setEnabledDegrees([...enabledDegrees, degreeId])
+    const nextAllowedDegreeList = (GENERATOR_LEVEL_CONFIG[level] ?? GENERATOR_LEVEL_CONFIG['level-1']).allowedDegrees
+    setSelectedFretboardMidis(
+      selectedFretboardMidis.filter((midi) => {
+        const degreeId = degreeIdFromMidi(midi, activeKeyRoot)
+        return isDegreeAllowedForLevel(degreeId, nextAllowedDegreeList)
+      }),
+    )
+    clearGeneratedLicks()
   }
 
   const buildLickForBar = useCallback(
@@ -485,13 +476,15 @@ function App() {
         keyRoot: activeKeyRoot,
         chordSymbol: chord,
         degree,
-        flavor: effectiveIncludeMajorNotes ? 'major' : 'minor',
         tempo: 76,
         level: generatorLevel,
-        enabledDegrees,
-        includeBend: allowBend && enabledDegrees.includes('b3'),
-        includeChordTones,
+        allowedDegrees: allowedDegreesForLevel,
+        weightFlavor: selectedLevelConfig.weightFlavor,
+        includeBend: true,
+        includeChordTones: selectedLevelConfig.includeChordTones,
         octaveSpan,
+        cagedPositionId,
+        selectedPositionMidis: selectedFretboardMidis,
       })
       setGeneratedLickForBar(targetBar, generated)
       return generated
@@ -499,13 +492,14 @@ function App() {
     [
       activeBars,
       activeKeyRoot,
-      allowBend,
+      allowedDegreesForLevel,
       bluesFormId,
-      effectiveIncludeMajorNotes,
-      enabledDegrees,
       generatorLevel,
-      includeChordTones,
       octaveSpan,
+      cagedPositionId,
+      selectedLevelConfig.includeChordTones,
+      selectedLevelConfig.weightFlavor,
+      selectedFretboardMidis,
       setGeneratedLickForBar,
     ],
   )
@@ -635,7 +629,7 @@ function App() {
       <div className="space-y-1">
         <h1 className="text-3xl font-bold tracking-tight text-zinc-100">EchoLick Blues POC</h1>
         <p className="text-sm text-zinc-400">
-          Select a bar, pick training degrees, and hear a locally generated permutation lick.
+          Select a bar, choose your level and box position, and hear a locally generated permutation lick.
         </p>
       </div>
 
@@ -679,6 +673,7 @@ function App() {
             onKeyChange={(nextKey) => {
               stopAutoPractice()
               setActiveKeyRoot(nextKey)
+              setSelectedFretboardMidis([])
               clearGeneratedLicks()
               setBarIndex(0)
             }}
@@ -687,16 +682,7 @@ function App() {
             selectedBluesFormDescription={selectedBluesForm.description}
             generatorLevel={generatorLevel}
             onGeneratorLevelChange={onGeneratorLevelChange}
-            effectiveIncludeMajorNotes={effectiveIncludeMajorNotes}
-            onIncludeMajorNotesChange={onIncludeMajorNotesChange}
-            isMajorBlues={isMajorBlues}
-            allowBend={allowBend}
-            onAllowBendChange={setAllowBend}
-            includeChordTones={includeChordTones}
-            onIncludeChordTonesChange={(checked) => {
-              stopAutoPractice()
-              setIncludeChordTones(checked)
-            }}
+            selectedLevelDescription={selectedLevelDescription}
             octaveSpan={octaveSpan}
             onOctaveSpanChange={(span: OctaveSpanId) => {
               stopAutoPractice()
@@ -704,9 +690,20 @@ function App() {
               clearGeneratedLicks()
               setBarIndex(0)
             }}
-            enabledDegrees={enabledDegrees}
-            isMajorExtensionDegree={isMajorExtensionDegree}
-            onToggleDegree={toggleDegree}
+            cagedPositionId={cagedPositionId}
+            onCagedPositionChange={(nextPosition: CagedPositionId) => {
+              stopAutoPractice()
+              setCagedPositionId(nextPosition)
+              setSelectedFretboardMidis([])
+              clearGeneratedLicks()
+              setBarIndex(0)
+            }}
+            selectedFretboardMidis={selectedFretboardMidis}
+            onToggleFretboardMidi={(midi) => {
+              stopAutoPractice()
+              toggleSelectedFretboardMidi(midi)
+            }}
+            allowedDegrees={visibleDegreesForFretboard}
             noteOrder={NOTE_ORDER}
           />
         </div>

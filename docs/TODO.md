@@ -1112,3 +1112,246 @@ Copy this template for each chunk update:
   - CHUNK-UX-FRETBOARD-INTERACT-A: make fretboard map interactive and add optional overlay for per-chord-tone highlighting per selected bar.
 - Risks/blockers:
   - Chord-tone injection currently works at pitch-selection level and is not yet constrained by explicit fret/string position policies.
+
+### 2026-06-20 17:20 - CHUNK-UX-FRETBOARD-POSITION-A
+- Status: done
+- Completed:
+  - Added CAGED position selection to configuration (`1st` through `5th`, including `3rd` as BB King box).
+  - Added reusable CAGED note-mapping helper that resolves in-range fretboard notes for the selected key/position.
+  - Constrained local lick generation to notes from the selected CAGED position (with octave-span guard still applied).
+  - Kept degree toggles as optional filters inside the selected position, with safe fallback to full box notes if toggles over-constrain.
+  - Updated fretboard visualization to highlight selected box notes and current degree-enabled notes together.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/store/useAppStore.ts`
+  - `apps/frontend/src/features/practice/components/ConfigurationCard.tsx`
+  - `apps/frontend/src/features/practice/components/FretboardMap.tsx`
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-GEN-INTERVAL-PATTERN-A: add variable interval-sequence motifs with repeatable ascent/descent pattern blocks on top of the new position-constrained note pool.
+- Risks/blockers:
+  - Current CAGED mapping is a practical pentatonic position model, not a full string/finger ergonomics engine (for example no string-skip difficulty weighting yet).
+
+### 2026-06-20 17:30 - CHUNK-UX-FRETBOARD-INTERACT-A
+- Status: done
+- Completed:
+  - Fixed fretboard string labeling ambiguity by distinguishing low and high E strings (`E6` and `E1`) in the rendered map.
+  - Removed degree-pool UI controls from configuration, per request to use fretboard note selection as primary note-source control.
+  - Added interactive fretboard note selection inside the chosen CAGED box (click to include/exclude possible lick notes).
+  - Added Zustand state for selected fretboard MIDI notes and wired key/position changes to clear stale note selections.
+  - Updated local generation path to constrain candidate notes to selected fretboard notes (with safe fallback to full selected CAGED box when nothing is selected).
+- Files changed:
+  - `apps/frontend/src/features/practice/components/FretboardMap.tsx`
+  - `apps/frontend/src/features/practice/components/ConfigurationCard.tsx`
+  - `apps/frontend/src/store/useAppStore.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-GEN-INTERVAL-PATTERN-A: layer variable interval motif/repetition logic on top of the new fretboard-selected candidate pool.
+- Risks/blockers:
+  - Fretboard selection currently operates by MIDI pitch class targets, not strict physical string-transition ergonomics (for example no string-skip difficulty cost yet).
+
+### 2026-06-20 18:24 - CHUNK-UX-CHECKBOX-FRETBOARD-HOTFIX-A
+- Status: done
+- Completed:
+  - Fixed major-notes checkbox behavior so it now directly affects playable/selected fretboard notes in CAGED view.
+  - Added major-extension gating on fretboard interaction: when major notes are disabled, `2/3/6` cells are visually muted and non-selectable.
+  - Auto-cleared already-selected major-extension fretboard notes when major-notes toggle is turned off.
+  - Restored clear chord-tone checkbox impact by allowing it to inject in-position chord-tone candidates into melodic target pool even if not explicitly selected.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/features/practice/components/FretboardMap.tsx`
+  - `apps/frontend/src/features/practice/components/ConfigurationCard.tsx`
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-UX-PROGRESSION-PATH-A: add explicit stage/preset UX (`3 notes` -> `minor penta` -> `add chord tones` -> `dorian` -> `mixolydian`) and wire each stage to fretboard/selectable-note constraints.
+- Risks/blockers:
+  - Current progression levels still mainly control rhythm density and articulation; harmonic-stage progression UI is not yet first-class.
+
+### 2026-06-20 18:40 - CHUNK-UX-PROGRESSION-PATH-A
+- Status: done
+- Completed:
+  - Removed configuration checkboxes and consolidated progression control into a single `Level` dropdown.
+  - Made bend articulation default-on in generation flow (no user toggle).
+  - Expanded level model to five staged presets:
+    - `Level 1`: 3-note core (`1,b3,5`)
+    - `Level 2`: minor pentatonic
+    - `Level 3`: minor pentatonic + chord-tone targeting
+    - `Level 4`: dorian color
+    - `Level 5`: mixolydian color
+  - Wired each level to explicit generator constraints (`allowedDegrees`, `includeChordTones`, weighting flavor) and filtered clickable fretboard notes accordingly.
+  - Added automatic cleanup of selected fretboard notes when switching to a stricter level and cleared stale generated bars on level change.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/store/useAppStore.ts`
+  - `apps/frontend/src/features/practice/components/FretboardMap.tsx`
+  - `apps/frontend/src/features/practice/components/ConfigurationCard.tsx`
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-UX-PROGRESSION-PATH-B: add auto-advance scaffolding (`unlock when score >= threshold for N loops`) so level progression can switch from manual to gamified.
+- Risks/blockers:
+  - Mixolydian/dorian presets are degree-driven and practical for training, but still not full mode-correct chord-function voice-leading across all bar functions.
+
+### 2026-06-20 18:42 - CHUNK-TESTS-LEVEL-PRESETS-A
+- Status: done
+- Completed:
+  - Added frontend test runner support via Vitest (`npm test` script + dev dependency).
+  - Refactored CAGED geometry model from fixed per-key note maps to E-reference degree templates (`stringIndexFromLowE`, `fretOffsetFromShapeRoot`, `degreeId`) with key transposition resolver.
+  - Added explicit template transposition helper (`getSemitoneShiftFromE`) and resolved-note output including concrete `string`, `fret`, `midi`, `degreeId`, and `noteName` while enforcing existing playable bounds.
+  - Added deterministic level policy helper (`resolveGeneratorLevelPolicy`) and level-candidate pool helper (`buildLevelCandidatePool`) so:
+    - base pool = resolved shape notes filtered by level policy
+    - selected fretboard notes optionally narrow the base pool
+    - chord-tone augmentation for level-3+ uses full resolved shape notes (not only selected subset)
+  - Verified level behavior with Vitest:
+    - level-1 emits only `1,b3,5`
+    - level-2 emits only minor pentatonic degrees
+    - level-3 chord-tone augmentation expands candidate behavior
+    - level-4 excludes major-3 from pool
+    - level-5 allows major-3 when geometry contains it
+    - at least one shape/key now has resolvable major-3
+  - Ran frontend verification: `npm test` and `npm run build` both pass.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.test.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-UX-PROGRESSION-PATH-B: add auto-advance scaffolding (`unlock when score >= threshold for N loops`) so level progression can switch from manual to gamified.
+- Risks/blockers:
+  - CAGED templates are now degree-transposable and level-complete, but still represent educational shape geometry (not full guitar fingering ergonomics such as string-transition difficulty weighting).
+
+### 2026-06-20 19:13 - CHUNK-GEN-MODEL-SPLIT-A
+- Status: done
+- Completed:
+  - Replaced direct `CAGED_SHAPE_TEMPLATES_E` dependency with a dedicated shape resolver module using geometry positions + runtime key resolution.
+  - Added dedicated entity type module for generator concepts (`template positions`, `resolved shape notes`, `candidate pool`, `level policy`).
+  - Added explicit shape-note resolver output that lists all in-shape chromatic notes by position with:
+    - `stringIndexFromLowE`
+    - `fret`
+    - `midi`
+    - `noteName`
+    - `chromaticSemitoneFromKey`
+    - optional mapped `degreeId`
+  - Added helper `buildShapeChromaticNoteBuckets` to expose 12-semitone buckets per selected shape/key for debugging and deterministic pooling.
+  - Kept existing UI controls intact while preserving level policy contract and candidate-pool architecture.
+  - Revalidated level-3 chord-tone behavior via candidate-pool tests and full suite.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/features/practice/musicGenerator/shapeResolver.ts`
+  - `apps/frontend/src/features/practice/musicGenerator/types.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.test.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-GEN-MODEL-SPLIT-B: move remaining generator subdomains (level policy + rhythmic/melodic scoring + articulation) into dedicated files and keep `musicGenerator.ts` as a thin facade.
+- Risks/blockers:
+  - Shape geometry currently uses practical position ranges; if you want strict pedagogical CAGED fingering templates per string/finger, we should add a curated per-shape geometry table next.
+
+### 2026-06-20 19:24 - CHUNK-GEN-SHAPE-TEMPLATE-NOTES-A
+- Status: done
+- Completed:
+  - Replaced `CAGED_SHAPE_RANGE_E` inference with explicit per-shape E-reference template notes containing:
+    - string identity (`E6/A/D/G/B/E1`)
+    - position (`fretOffsetFromShapeRoot`)
+    - concrete E-reference note (`noteNameInE`)
+    - chromatic semitone index and label (`chromaticSemitoneFromE`, `chromaticDegreeLabel`)
+  - Kept transposition flow but now resolves from explicit template notes rather than from inferred fret ranges.
+  - Expanded resolved shape note entity to include chromatic labels and string identity, so note objects are self-descriptive.
+  - Updated `CandidatePool`/`MelodicCandidate` to carry actual note entities (string/fret/midi/note/chromatic info) instead of degree+midi only.
+  - Added/updated tests to verify:
+    - explicit template note export is populated and semitone-safe
+    - candidate pools include concrete note fields
+    - level-3 chord-tone augmentation still expands candidate behavior
+  - Re-ran frontend checks: `npm test` and `npm run build` both pass.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator/types.ts`
+  - `apps/frontend/src/features/practice/musicGenerator/shapeResolver.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.test.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-GEN-SHAPE-TEMPLATE-NOTES-B: tune/curate per-shape template note lists musically (rather than window-complete chromatic coverage) if you want stricter CAGED pedagogy.
+- Risks/blockers:
+  - Templates are now explicit note mappings, but they still include full chromatic windows; if you want “canonical” CAGED-only fingering subsets, we should trim these lists per shape.
+
+### 2026-06-20 20:51 - CHUNK-GEN-DEGREE-GATING-BUGFIX-A
+- Status: done
+- Completed:
+  - Fixed fretboard-level gating so in-shape notes with unsupported chromatic degrees (`null` degree mapping, e.g. `b2/#5/7`) are now locked instead of shown/selectable as valid pool notes.
+  - Fixed level-change cleanup so selected fretboard MIDI notes that do not map to allowed degrees are removed (rather than retained).
+  - Added shared degree-allowance helper (`isDegreeAllowedForLevel`) and reused it across UI gating + level-change filtering to keep behavior consistent.
+  - Added regression tests for unsupported-degree rejection and selected-note narrowing behavior when unsupported notes are present.
+  - Re-ran frontend verification: `npm test -- --run` and `npm run build` both pass.
+- Files changed:
+  - `apps/frontend/src/features/practice/components/FretboardMap.tsx`
+  - `apps/frontend/src/App.tsx`
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.test.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-GEN-SHAPE-TEMPLATE-NOTES-B: curate each CAGED shape template to canonical note subsets (instead of full chromatic windows) for stricter pedagogy and fewer non-scale lockouts.
+- Risks/blockers:
+  - Current templates still include broad chromatic coverage by design, so some in-box notes remain intentionally visible-but-locked at stricter levels.
+
+### 2026-06-20 20:59 - CHUNK-GEN-CHORDTONES-LEVELS-SIMPLIFY-A
+- Status: done
+- Completed:
+  - Simplified progression levels to three only (`level-1`, `level-2`, `level-3`) by removing level-4/5 from generator unions, presets, durations, config, and dropdown options.
+  - Made chord-tone resolution explicitly chord-symbol based and exportable via `resolveChordTonePitchClassesForSymbol(chordSymbol)`.
+  - Updated candidate construction so each candidate carries an explicit `isChordTone` flag derived from the current bar chord tone set.
+  - Kept level-3 behavior: base pool (allowed degrees) plus chord-tone augmentation from the full resolved shape for the current chord.
+  - Updated tests to remove level-4/5 assertions and add current-chord-sensitive chord-tone augmentation coverage (`E7` vs `Am7`).
+  - Re-ran frontend verification: `npm test` and `npm run build` both pass.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator/types.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.test.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-GEN-SHAPE-TEMPLATE-NOTES-B: curate each CAGED shape template to canonical note subsets and rebalance level-3 chord-tone weights by chord quality.
+- Risks/blockers:
+  - Chord tones are now chord-symbol-derived, but augmentation strength is still probability-based; if needed, force stronger chord-tone targeting on strong beats as a follow-up.
+
+### 2026-06-20 21:17 - CHUNK-TESTS-GEN-COVERAGE-A
+- Status: done
+- Completed:
+  - Expanded unit coverage to catch generator regressions across the exported helper surface.
+  - Added tests for generator methods:
+    - `resolveChordMidi`
+    - `resolvePracticeDegreeFromLabel`
+    - `buildBarContextFromForm`
+    - `normalizeLickNotes`
+    - `resolveChordTonePitchClassesForSymbol` (quality-sensitive)
+    - `resolveGeneratorLevelPolicy`
+    - existing pool/gating/level tests retained and extended
+  - Added dedicated `shapeResolver` test file covering:
+    - `CAGED_SHAPE_TEMPLATE_NOTES_E`
+    - `getSemitoneShiftFromE`
+    - `resolveShapeNotesForKey`
+  - Verified all tests and build pass after coverage expansion.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.test.ts`
+  - `apps/frontend/src/features/practice/musicGenerator/shapeResolver.test.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - CHUNK-UX-FRETBOARD-CHORDTONE-HIGHLIGHT-A: surface current-bar chord tones visually in fretboard UI so users can see harmonic targets directly.
+- Risks/blockers:
+  - Private/internal non-exported helpers are still behavior-tested indirectly; direct unit isolation would require extracting them into exported modules.
+
+### 2026-06-20 21:34 - CHUNK-UX-FRETBOARD-CHORDTONE-HIGHLIGHT-A
+- Status: done
+- Completed:
+  - Added `buildFretboardVisibleDegrees` to derive fretboard-visible degrees from both level policy and current-bar chord tones.
+  - Wired `App` to pass chord-aware visible degrees to `FretboardMap`, so level-3 no longer blocks harmonic tones like the major 3rd on dominant I7 bars.
+  - Added regression test for the exact scenario: key `A`, form `all-dominant`, level-3, bar 1 (`I7`), asserting degree `3` is visible on the fretboard.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.test.ts`
+  - `apps/frontend/src/App.tsx`
+  - `docs/TODO.md`
+- Next best step:
+  - Add chord-tone-specific visual accent in `FretboardMap` (separate from generic allowed-degree styling) so users can immediately distinguish harmonic targets.
+- Risks/blockers:
+  - Fretboard note visibility is now chord-aware, but selected-note cleanup when changing bars still preserves existing selections; auto-pruning stale selections by new bar context could be added later if desired.

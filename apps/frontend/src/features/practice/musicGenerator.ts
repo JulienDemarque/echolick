@@ -1,18 +1,33 @@
 import type { FormBarResponse, GenerateLickResponse } from '../../api/client'
 import { BLUES_PROGRESSION } from '../../music/progression'
 import type { LickNote } from '../../types/music'
+import { CAGED_SHAPE_TEMPLATE_NOTES_E, getSemitoneShiftFromE, resolveShapeNotesForKey } from './musicGenerator/shapeResolver'
+import type {
+  BluesFormId,
+  CandidatePool,
+  CagedPositionId,
+  DegreeOptionId,
+  GeneratorLevelId,
+  GeneratorLevelPolicy,
+  MelodicCandidate,
+  NoteName,
+  OctaveSpanId,
+  ResolvedShapeNote,
+} from './musicGenerator/types'
 
 export const NOTE_ORDER = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
-export type NoteName = (typeof NOTE_ORDER)[number]
+export type { NoteName, GeneratorLevelId, DegreeOptionId, BluesFormId, OctaveSpanId, CagedPositionId }
 type ChordQuality = 'dominant7' | 'minor7' | 'major7' | 'dim7'
-export type GeneratorLevelId = 'level-1' | 'level-2' | 'level-3'
-export type DegreeOptionId = '1' | '2' | 'b3' | '3' | '4' | 'b5' | '5' | '6' | 'b7'
-export type BluesFormId = 'all-dominant' | 'all-minor' | 'minor-iv-major' | 'minor-v-dominant' | 'same-old-blues'
-export type OctaveSpanId = 1 | 2
 
 const NOTE_SET = new Set<string>(NOTE_ORDER)
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-const MAJOR_EXTENSION_DEGREES: DegreeOptionId[] = ['2', '3', '6']
+export const CAGED_POSITION_OPTIONS: Array<{ id: CagedPositionId; label: string; description: string }> = [
+  { id: '1-e-shape', label: '1st Box (E shape)', description: 'Root position minor pentatonic box.' },
+  { id: '2-d-shape', label: '2nd Box (D shape)', description: 'Next position up the neck.' },
+  { id: '3-c-shape-bb-king', label: '3rd Box (C shape / BB King)', description: 'BB King box neighborhood.' },
+  { id: '4-a-shape', label: '4th Box (A shape)', description: 'Upper-mid register position.' },
+  { id: '5-g-shape', label: '5th Box (G shape)', description: 'Highest common CAGED box in this range.' },
+]
 const ROOT_SCALE_WEIGHTS: Record<'major' | 'minor', Record<DegreeOptionId, number>> = {
   major: {
     '1': 1.55,
@@ -53,15 +68,29 @@ const DEGREE_OPTION_MAP = Object.fromEntries(DEGREE_OPTIONS.map((item) => [item.
   DegreeOptionId,
   (typeof DEGREE_OPTIONS)[number]
 >
+
 export const DEGREE_LEVEL_PRESETS: Record<GeneratorLevelId, DegreeOptionId[]> = {
   'level-1': ['1', 'b3', '5'],
   'level-2': ['1', 'b3', '4', '5', 'b7'],
-  'level-3': ['1', 'b3', '4', 'b5', '5', 'b7'],
+  'level-3': ['1', 'b3', '4', '5', 'b7'],
 }
 const LEVEL_DURATIONS: Record<GeneratorLevelId, number[]> = {
   'level-1': [1],
   'level-2': [0.5, 1],
-  'level-3': [0.5, 1, 2],
+  'level-3': [0.5, 1],
+}
+export const GENERATOR_LEVEL_OPTIONS: Array<{ id: GeneratorLevelId; label: string; description: string }> = [
+  { id: 'level-1', label: 'Level 1: 3 Notes (1, b3, 5)', description: 'Start with the core blues triad tones.' },
+  { id: 'level-2', label: 'Level 2: Minor Pentatonic', description: 'Unlock full minor pentatonic shape.' },
+  { id: 'level-3', label: 'Level 3: + Chord Tones', description: 'Minor pentatonic plus harmonic targeting.' },
+]
+export const GENERATOR_LEVEL_CONFIG: Record<
+  GeneratorLevelId,
+  { allowedDegrees: DegreeOptionId[]; includeChordTones: boolean; weightFlavor: 'major' | 'minor' }
+> = {
+  'level-1': { allowedDegrees: DEGREE_LEVEL_PRESETS['level-1'], includeChordTones: false, weightFlavor: 'minor' },
+  'level-2': { allowedDegrees: DEGREE_LEVEL_PRESETS['level-2'], includeChordTones: false, weightFlavor: 'minor' },
+  'level-3': { allowedDegrees: DEGREE_LEVEL_PRESETS['level-3'], includeChordTones: true, weightFlavor: 'minor' },
 }
 
 export const BLUES_FORM_OPTIONS: Array<{
@@ -157,6 +186,11 @@ const formatChordSymbol = (root: NoteName, quality: ChordQuality): string => {
 }
 
 const midiToPitchClass = (midi: number): number => ((Math.round(midi) % 12) + 12) % 12
+export const degreeIdFromMidi = (midi: number, keyRoot: NoteName): DegreeOptionId | null => {
+  const rootPitchClass = NOTE_ORDER.indexOf(keyRoot)
+  const semitone = ((midiToPitchClass(midi) - rootPitchClass) % 12 + 12) % 12
+  return DEGREE_OPTIONS.find((option) => option.semitones === semitone)?.id ?? null
+}
 const midiToNoteNameWithOctave = (midi: number): string => {
   const pitchClass = midiToPitchClass(midi)
   const octave = Math.floor(midi / 12) - 1
@@ -187,17 +221,56 @@ const buildDegreeMidiCandidates = (keyRoot: NoteName, degreeId: DegreeOptionId):
   return candidates.filter((midi) => midi >= 50 && midi <= 82)
 }
 
+const buildFallbackMelodicCandidates = (keyRoot: NoteName, level: GeneratorLevelId, allowedDegrees: DegreeOptionId[]) =>
+  DEGREE_LEVEL_PRESETS[level]
+    .filter((degreeId) => allowedDegrees.includes(degreeId))
+    .flatMap((degreeId) =>
+      buildDegreeMidiCandidates(keyRoot, degreeId).map((midi) => ({
+        stringId: 'E6' as const,
+        stringIndexFromLowE: 0,
+        fret: 0,
+        midi,
+        noteName: midiToNoteNameWithOctave(midi),
+        chromaticSemitoneFromKey: DEGREE_OPTION_MAP[degreeId].semitones,
+        degreeId,
+        isChordTone: false,
+      })),
+    )
+
+export { getSemitoneShiftFromE }
+export { CAGED_SHAPE_TEMPLATE_NOTES_E }
+export type CagedPositionNote = ResolvedShapeNote
+
+export const buildCagedPositionNotes = (keyRoot: NoteName, cagedPositionId: CagedPositionId): CagedPositionNote[] => {
+  return resolveShapeNotesForKey(keyRoot, cagedPositionId)
+}
+
+export const buildShapeChromaticNoteBuckets = (
+  keyRoot: NoteName,
+  cagedPositionId: CagedPositionId,
+): Record<number, CagedPositionNote[]> => {
+  const notes = buildCagedPositionNotes(keyRoot, cagedPositionId)
+  const buckets: Record<number, CagedPositionNote[]> = {}
+  for (let semitone = 0; semitone < 12; semitone += 1) {
+    buckets[semitone] = []
+  }
+  notes.forEach((note) => {
+    buckets[note.chromaticSemitoneFromKey]!.push(note)
+  })
+  return buckets
+}
+
+export const isDegreeAllowedForLevel = (
+  degreeId: DegreeOptionId | null,
+  allowedDegrees: DegreeOptionId[],
+): degreeId is DegreeOptionId => degreeId !== null && allowedDegrees.includes(degreeId)
+
 const constrainCandidatesToSpan = (candidates: number[], minMidi: number, maxMidi: number, spanLimit: number): number[] =>
   candidates.filter((candidate) => {
     const nextMin = Math.min(minMidi, candidate)
     const nextMax = Math.max(maxMidi, candidate)
     return nextMax - nextMin <= spanLimit
   })
-
-const chooseClosestMidi = (candidates: number[], targetMidi: number): number =>
-  candidates.reduce((best, candidate) =>
-    Math.abs(candidate - targetMidi) < Math.abs(best - targetMidi) ? candidate : best,
-  )
 
 const chooseClosestAboveMidi = (candidates: number[], fromMidi: number, maxDelta: number): number | null => {
   const above = candidates
@@ -223,7 +296,7 @@ const resolveChordQuality = (chordSymbol: string): ChordQuality => {
   return 'dominant7'
 }
 
-const resolveChordTonePitchClasses = (chordSymbol: string): Set<number> => {
+export const resolveChordTonePitchClassesForSymbol = (chordSymbol: string): Set<number> => {
   const root = chordRootFromSymbol(chordSymbol) ?? 'A'
   const rootMidi = 60 + NOTE_ORDER.indexOf(root)
   const quality = resolveChordQuality(chordSymbol)
@@ -231,18 +304,93 @@ const resolveChordTonePitchClasses = (chordSymbol: string): Set<number> => {
   return new Set(qualityIntervals.map((interval) => midiToPitchClass(rootMidi + interval)))
 }
 
-const buildChordToneMidiCandidates = (chordSymbol: string): number[] => {
-  const root = chordRootFromSymbol(chordSymbol) ?? 'A'
-  const rootMidi = 60 + NOTE_ORDER.indexOf(root)
-  const quality = resolveChordQuality(chordSymbol)
-  const intervals = quality === 'dim7' ? [0, 3, 6, 9] : quality === 'major7' ? [0, 4, 7, 11] : quality === 'minor7' ? [0, 3, 7, 10] : [0, 4, 7, 10]
-  const candidates: number[] = []
-  for (let octave = -1; octave <= 1; octave += 1) {
-    intervals.forEach((interval) => {
-      candidates.push(rootMidi + interval + octave * 12)
-    })
+export const buildFretboardVisibleDegrees = ({
+  keyRoot,
+  allowedDegrees,
+  includeChordTones,
+  chordSymbol,
+}: {
+  keyRoot: NoteName
+  allowedDegrees: DegreeOptionId[]
+  includeChordTones: boolean
+  chordSymbol: string
+}): DegreeOptionId[] => {
+  const visible = new Set<DegreeOptionId>(allowedDegrees)
+  if (!includeChordTones) return Array.from(visible)
+
+  const keyPitchClass = NOTE_ORDER.indexOf(keyRoot)
+  const chordTonePitchClasses = resolveChordTonePitchClassesForSymbol(chordSymbol)
+  chordTonePitchClasses.forEach((pitchClass) => {
+    const semitoneFromKey = ((pitchClass - keyPitchClass) % 12 + 12) % 12
+    const degreeId = DEGREE_OPTIONS.find((option) => option.semitones === semitoneFromKey)?.id
+    if (degreeId) {
+      visible.add(degreeId)
+    }
+  })
+  return Array.from(visible)
+}
+
+export const resolveGeneratorLevelPolicy = (level: GeneratorLevelId): GeneratorLevelPolicy => GENERATOR_LEVEL_CONFIG[level]
+
+const mapResolvedPositionNotesToCandidates = (notes: CagedPositionNote[]): MelodicCandidate[] =>
+  notes
+    .filter((note): note is CagedPositionNote & { degreeId: DegreeOptionId } => note.degreeId !== null)
+    .map((note) => ({
+      stringId: note.stringId,
+      stringIndexFromLowE: note.stringIndexFromLowE,
+      fret: note.fret,
+      midi: note.midi,
+      noteName: note.noteName,
+      chromaticSemitoneFromKey: note.chromaticSemitoneFromKey,
+      degreeId: note.degreeId,
+      isChordTone: false,
+    }))
+
+const dedupeCandidatesByMidi = (candidates: MelodicCandidate[]): MelodicCandidate[] => {
+  const deduped = new Map<number, MelodicCandidate>()
+  candidates.forEach((candidate) => {
+    const midi = Math.round(candidate.midi)
+    if (!deduped.has(midi)) {
+      deduped.set(midi, candidate)
+    }
+  })
+  return Array.from(deduped.values()).sort((a, b) => a.midi - b.midi)
+}
+
+export const buildLevelCandidatePool = ({
+  resolvedShapeNotes,
+  allowedDegrees,
+  selectedPositionMidis,
+  includeChordTones,
+  chordTonePitchClasses,
+}: {
+  resolvedShapeNotes: CagedPositionNote[]
+  allowedDegrees: DegreeOptionId[]
+  selectedPositionMidis: number[]
+  includeChordTones: boolean
+  chordTonePitchClasses: Set<number>
+}): CandidatePool => {
+  const shapeCandidates = mapResolvedPositionNotesToCandidates(resolvedShapeNotes).map((candidate) => ({
+    ...candidate,
+    isChordTone: chordTonePitchClasses.has(midiToPitchClass(candidate.midi)),
+  }))
+  const baseCandidates = shapeCandidates.filter((candidate) => allowedDegrees.includes(candidate.degreeId))
+  const selectedMidiSet = new Set(selectedPositionMidis.map((midi) => Math.round(midi)))
+  const selectedCandidates =
+    selectedMidiSet.size > 0 ? baseCandidates.filter((candidate) => selectedMidiSet.has(Math.round(candidate.midi))) : baseCandidates
+  const narrowedBaseCandidates = selectedCandidates.length > 0 ? selectedCandidates : baseCandidates
+
+  const chordToneAugmentationCandidates = includeChordTones
+    ? shapeCandidates.filter((candidate) => candidate.isChordTone)
+    : []
+  const finalCandidates = dedupeCandidatesByMidi([...narrowedBaseCandidates, ...chordToneAugmentationCandidates])
+
+  return {
+    baseCandidates: dedupeCandidatesByMidi(baseCandidates),
+    narrowedBaseCandidates: dedupeCandidatesByMidi(narrowedBaseCandidates),
+    chordToneAugmentationCandidates: dedupeCandidatesByMidi(chordToneAugmentationCandidates),
+    finalCandidates,
   }
-  return candidates.filter((midi) => midi >= 50 && midi <= 82)
 }
 
 const isStrongBeat = (beatStart: number): boolean => {
@@ -311,37 +459,6 @@ const scoreDegreeCandidate = ({
   return movementWeight * directionWeight * chordToneWeight * repeatPenalty * avoidWeight * colorWeight * rootScaleWeight
 }
 
-const scoreChordToneCandidate = ({
-  nearestMidi,
-  previousMidi,
-  previousDirection,
-  onStrongBeat,
-}: {
-  nearestMidi: number
-  previousMidi: number
-  previousDirection: -1 | 0 | 1
-  onStrongBeat: boolean
-}): number => {
-  const delta = nearestMidi - previousMidi
-  const distance = Math.abs(delta)
-  const candidateDirection: -1 | 0 | 1 = delta > 0 ? 1 : delta < 0 ? -1 : 0
-  const movementWeight = distance <= 2 ? 2.1 : distance <= 4 ? 1.6 : distance <= 7 ? 1.02 : 0.54
-  const directionWeight =
-    previousDirection === 0 || candidateDirection === 0
-      ? candidateDirection === 0
-        ? 0.9
-        : 1
-      : previousDirection === candidateDirection
-        ? distance <= 3
-          ? 1.18
-          : 0.9
-        : distance <= 2
-          ? 1.06
-          : 0.76
-  const chordToneWeight = onStrongBeat ? 2.45 : 1.85
-  return movementWeight * directionWeight * chordToneWeight
-}
-
 const buildRhythmPattern = (allowedDurations: number[]): number[] => {
   const durations: number[] = []
   let remaining = 4
@@ -368,21 +485,6 @@ export const resolveChordMidi = (chordSymbol: string): number[] => {
   const rootMidi = 60 + NOTE_ORDER.indexOf(root)
   return [rootMidi, rootMidi + 4, rootMidi + 7, rootMidi + 10]
 }
-
-export const buildRecommendedDegreePool = (
-  level: GeneratorLevelId,
-  isMajorBlues: boolean,
-  includeMajorNotes: boolean,
-): DegreeOptionId[] => {
-  const base = DEGREE_LEVEL_PRESETS[level]
-  if (!isMajorBlues || !includeMajorNotes) {
-    return base
-  }
-  const additions = MAJOR_EXTENSION_DEGREES.slice(0, level === 'level-1' ? 1 : level === 'level-2' ? 2 : 3)
-  return Array.from(new Set([...base, ...additions]))
-}
-
-export const isMajorExtensionDegree = (degreeId: DegreeOptionId): boolean => MAJOR_EXTENSION_DEGREES.includes(degreeId)
 
 export const resolvePracticeDegreeFromLabel = (label: string): 'I' | 'IV' | 'V' => {
   const normalized = label.toUpperCase()
@@ -412,36 +514,51 @@ export const createPermutationLick = ({
   keyRoot,
   chordSymbol,
   degree,
-  flavor,
   tempo,
   level,
-  enabledDegrees,
+  allowedDegrees,
+  weightFlavor,
   includeBend,
   includeChordTones,
   octaveSpan,
+  cagedPositionId,
+  selectedPositionMidis,
 }: {
   keyRoot: NoteName
   chordSymbol: string
   degree: 'I' | 'IV' | 'V'
-  flavor: 'major' | 'minor'
   tempo: number
   level: GeneratorLevelId
-  enabledDegrees: DegreeOptionId[]
+  allowedDegrees: DegreeOptionId[]
+  weightFlavor: 'major' | 'minor'
   includeBend: boolean
   includeChordTones: boolean
   octaveSpan: OctaveSpanId
+  cagedPositionId: CagedPositionId
+  selectedPositionMidis: number[]
 }): GenerateLickResponse => {
-  const effectiveDegrees = enabledDegrees.length > 0 ? enabledDegrees : DEGREE_LEVEL_PRESETS[level]
   const durations = buildRhythmPattern(LEVEL_DURATIONS[level])
   const notes: GenerateLickResponse['notes'] = []
   const chordRootMidi = resolveChordMidi(chordSymbol)[0] ?? 60
   const chordRootPitchClass = midiToPitchClass(chordRootMidi)
   const chordQuality = resolveChordQuality(chordSymbol)
-  const chordTonePitchClasses = resolveChordTonePitchClasses(chordSymbol)
-  const chordToneMidiCandidates = includeChordTones ? buildChordToneMidiCandidates(chordSymbol) : []
+  const chordTonePitchClasses = resolveChordTonePitchClassesForSymbol(chordSymbol)
+  const resolvedShapeNotes = buildCagedPositionNotes(keyRoot, cagedPositionId)
+  const candidatePool = buildLevelCandidatePool({
+    resolvedShapeNotes,
+    allowedDegrees,
+    selectedPositionMidis,
+    includeChordTones,
+    chordTonePitchClasses,
+  })
+  const melodicCandidates =
+    candidatePool.finalCandidates.length > 0
+      ? candidatePool.finalCandidates
+      : buildFallbackMelodicCandidates(keyRoot, level, allowedDegrees)
+  const effectiveDegrees = Array.from(new Set(melodicCandidates.map((candidate) => candidate.degreeId)))
 
   const targetDegrees: Array<DegreeOptionId | null> = []
-  type MelodicTarget = { kind: 'degree'; degreeId: DegreeOptionId } | { kind: 'chordTone'; midi: number }
+  type MelodicTarget = { kind: 'position'; midi: number; degreeId: DegreeOptionId }
 
   let cursor = 0
   let previousMidi = chordRootMidi
@@ -454,75 +571,47 @@ export const createPermutationLick = ({
     const onStrongBeat = isStrongBeat(cursor)
     const weightedTargets: Array<{ value: MelodicTarget; weight: number }> = []
 
-    effectiveDegrees.forEach((degreeId) => {
-      const candidates = buildDegreeMidiCandidates(keyRoot, degreeId)
-      const constrainedCandidates =
-        lickMinMidi === null || lickMaxMidi === null
-          ? candidates
-          : constrainCandidatesToSpan(candidates, lickMinMidi, lickMaxMidi, spanLimit)
-      const candidatePool = constrainedCandidates.length > 0 ? constrainedCandidates : candidates
-      const nearestMidi =
-        candidatePool.length > 0
-          ? chooseClosestMidi(candidatePool, previousMidi)
-          : candidates.length > 0
-            ? chooseClosestMidi(candidates, previousMidi)
-            : previousMidi
-      const candidateIsChordTone = chordTonePitchClasses.has(midiToPitchClass(nearestMidi))
-      const intervalFromChordRoot = (midiToPitchClass(nearestMidi) - chordRootPitchClass + 12) % 12
-      const weight = scoreDegreeCandidate({
-        nearestMidi,
+    const melodicPool =
+      lickMinMidi === null || lickMaxMidi === null
+        ? melodicCandidates
+        : (() => {
+            const minMidi = lickMinMidi
+            const maxMidi = lickMaxMidi
+            return melodicCandidates.filter(
+              (candidate) => constrainCandidatesToSpan([candidate.midi], minMidi, maxMidi, spanLimit).length > 0,
+            )
+          })()
+    const resolvedPool = melodicPool.length > 0 ? melodicPool : melodicCandidates
+
+    resolvedPool.forEach((candidate) => {
+      const candidateIsChordTone = chordTonePitchClasses.has(midiToPitchClass(candidate.midi))
+      const intervalFromChordRoot = (midiToPitchClass(candidate.midi) - chordRootPitchClass + 12) % 12
+      const degreeWeight = ROOT_SCALE_WEIGHTS[weightFlavor][candidate.degreeId]
+      let weight = scoreDegreeCandidate({
+        nearestMidi: candidate.midi,
         previousMidi,
         previousDirection,
         isChordTone: candidateIsChordTone,
         onStrongBeat,
         previousDegree,
-        degreeId,
+        degreeId: candidate.degreeId,
         chordQuality,
         intervalFromChordRoot,
-        rootScaleWeight: ROOT_SCALE_WEIGHTS[flavor][degreeId],
+        rootScaleWeight: degreeWeight,
       })
-      weightedTargets.push({ value: { kind: 'degree', degreeId }, weight })
+      if (includeChordTones && candidateIsChordTone) {
+        weight *= 1.22
+      }
+      if (!includeChordTones && candidateIsChordTone) {
+        weight *= 0.92
+      }
+      weightedTargets.push({ value: { kind: 'position', midi: candidate.midi, degreeId: candidate.degreeId }, weight })
     })
 
-    if (chordToneMidiCandidates.length > 0) {
-      const constrainedChordTones =
-        lickMinMidi === null || lickMaxMidi === null
-          ? chordToneMidiCandidates
-          : constrainCandidatesToSpan(chordToneMidiCandidates, lickMinMidi, lickMaxMidi, spanLimit)
-      const chordPool = constrainedChordTones.length > 0 ? constrainedChordTones : chordToneMidiCandidates
-      const nearestByPitchClass = new Map<number, number>()
-      chordPool.forEach((candidate) => {
-        const pitchClass = midiToPitchClass(candidate)
-        const existing = nearestByPitchClass.get(pitchClass)
-        if (existing === undefined || Math.abs(candidate - previousMidi) < Math.abs(existing - previousMidi)) {
-          nearestByPitchClass.set(pitchClass, candidate)
-        }
-      })
-      nearestByPitchClass.forEach((nearestMidi) => {
-        weightedTargets.push({
-          value: { kind: 'chordTone', midi: nearestMidi },
-          weight: scoreChordToneCandidate({
-            nearestMidi,
-            previousMidi,
-            previousDirection,
-            onStrongBeat,
-          }),
-        })
-      })
-    }
-
     const selectedTarget = pickWeightedRandom<MelodicTarget>(weightedTargets)
-    const degreeId = selectedTarget.kind === 'degree' ? selectedTarget.degreeId : null
+    const degreeId = selectedTarget.degreeId
     targetDegrees.push(degreeId)
-    const midi = selectedTarget.kind === 'degree' ? (() => {
-      const candidates = buildDegreeMidiCandidates(keyRoot, selectedTarget.degreeId)
-      const constrainedCandidates =
-        lickMinMidi === null || lickMaxMidi === null
-          ? candidates
-          : constrainCandidatesToSpan(candidates, lickMinMidi, lickMaxMidi, spanLimit)
-      const candidatePool = constrainedCandidates.length > 0 ? constrainedCandidates : candidates
-      return candidatePool.length > 0 ? chooseClosestMidi(candidatePool, previousMidi) : previousMidi
-    })() : selectedTarget.midi
+    const midi = selectedTarget.midi
     const delta = midi - previousMidi
     previousDirection = delta > 0 ? 1 : delta < 0 ? -1 : 0
     previousMidi = midi
@@ -637,7 +726,7 @@ export const createPermutationLick = ({
     key: keyRoot,
     degree,
     chord: chordSymbol,
-    flavor,
+    flavor: weightFlavor,
     tempo,
     timeSignature: '4/4',
     notes,

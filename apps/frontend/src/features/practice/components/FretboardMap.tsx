@@ -1,14 +1,20 @@
 import { Fragment } from "react";
 import {
+  buildCagedPositionNotes,
   DEGREE_OPTIONS,
+  isDegreeAllowedForLevel,
+  type CagedPositionId,
   type DegreeOptionId,
   type NoteName,
 } from "../musicGenerator";
 
 type FretboardMapProps = {
   activeKeyRoot: NoteName;
-  enabledDegrees: DegreeOptionId[];
   noteOrder: readonly NoteName[];
+  cagedPositionId: CagedPositionId;
+  selectedMidis: number[];
+  onToggleMidi: (midi: number) => void;
+  allowedDegrees: DegreeOptionId[];
 };
 
 const STRINGS_LOW_TO_HIGH: NoteName[] = ["E", "A", "D", "G", "B", "E"];
@@ -33,15 +39,28 @@ const pitchClassDistance = (from: number, to: number): number =>
 
 export function FretboardMap({
   activeKeyRoot,
-  enabledDegrees,
   noteOrder,
+  cagedPositionId,
+  selectedMidis,
+  onToggleMidi,
+  allowedDegrees,
 }: FretboardMapProps) {
   const rootPitchClass = noteOrder.indexOf(activeKeyRoot);
-  const enabledSet = new Set(enabledDegrees);
+  const selectedSet = new Set(selectedMidis.map((midi) => Math.round(midi)));
+  const cagedNotes = buildCagedPositionNotes(activeKeyRoot, cagedPositionId);
+  const cagedNoteByPosition = new Map<
+    string,
+    { midi: number; degreeId: (typeof cagedNotes)[number]["degreeId"] }
+  >(
+    cagedNotes.map((note) => [
+      `${note.stringIndexFromLowE}-${note.fret}`,
+      { midi: note.midi, degreeId: note.degreeId },
+    ]),
+  );
 
   return (
     <div className="space-y-2">
-      <p className="text-xs font-medium text-zinc-200">Fretboard (preview)</p>
+      <p className="text-xs font-medium text-zinc-200">Fretboard (selected CAGED position)</p>
       <div className="overflow-x-auto rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
         <div className="grid min-w-[640px] grid-cols-[56px_repeat(13,minmax(0,1fr))] gap-1">
           <div />
@@ -55,15 +74,22 @@ export function FretboardMap({
           ))}
           {STRINGS_LOW_TO_HIGH.slice()
             .reverse()
-            .map((openString) => {
+            .map((openString, reverseIndex) => {
               const openPitchClass = noteOrder.indexOf(openString);
+              const stringIndexFromLowE = STRINGS_LOW_TO_HIGH.length - 1 - reverseIndex;
+              const stringLabel =
+                stringIndexFromLowE === 0
+                  ? "E6"
+                  : stringIndexFromLowE === STRINGS_LOW_TO_HIGH.length - 1
+                    ? "E1"
+                    : openString;
               return (
-                <Fragment key={openString}>
+                <Fragment key={`${openString}-${reverseIndex}`}>
                   <div
-                    key={`label-${openString}`}
+                    key={`label-${openString}-${reverseIndex}`}
                     className="flex items-center text-[10px] font-semibold text-zinc-400"
                   >
-                    {openString}
+                    {stringLabel}
                   </div>
                   {Array.from({ length: FRET_COUNT }, (_, fret) => {
                     const pitchClass = (openPitchClass + fret) % 12;
@@ -72,31 +98,50 @@ export function FretboardMap({
                       pitchClass,
                     );
                     const degreeId = semitoneToDegreeMap.get(semitone);
-                    const isEnabled = degreeId
-                      ? enabledSet.has(degreeId)
+                    const cagedData =
+                      cagedNoteByPosition.get(`${stringIndexFromLowE}-${fret}`) ?? null;
+                    const isInCagedPosition = cagedData !== null;
+                    const effectiveDegree = cagedData?.degreeId ?? degreeId ?? null;
+                    const isBlockedByLevel =
+                      isInCagedPosition &&
+                      !isDegreeAllowedForLevel(effectiveDegree, allowedDegrees);
+                    const isSelected = cagedData
+                      ? selectedSet.has(Math.round(cagedData.midi))
                       : false;
-                    const isRoot = degreeId === "1";
-                    const markerVisible = FRET_MARKERS.has(fret) && !isEnabled;
-                    const label = degreeId
-                      ? (degreeLabelMap.get(degreeId) ?? degreeId)
+                    const isRoot = effectiveDegree === "1";
+                    const markerVisible = FRET_MARKERS.has(fret) && !isInCagedPosition;
+                    const label = effectiveDegree
+                      ? (degreeLabelMap.get(effectiveDegree) ?? effectiveDegree)
                       : "";
                     return (
-                      <div
+                      <button
                         key={`${openString}-${fret}`}
+                        type="button"
+                        onClick={() => {
+                          if (cagedData && !isBlockedByLevel) {
+                            onToggleMidi(cagedData.midi);
+                          }
+                        }}
+                        disabled={!cagedData || isBlockedByLevel}
                         className={`relative flex h-7 items-center justify-center rounded border text-[10px] ${
-                          isEnabled
+                          isBlockedByLevel && isInCagedPosition
+                            ? "border-zinc-700 bg-zinc-900 text-zinc-500"
+                          :
+                          isSelected && isInCagedPosition
                             ? isRoot
                               ? "border-amber-300 bg-amber-400/25 text-amber-100"
                               : "border-sky-400 bg-sky-500/20 text-sky-100"
+                            : isInCagedPosition
+                              ? "border-violet-500/80 bg-violet-500/15 text-violet-100"
                             : "border-zinc-800 bg-zinc-900/80 text-zinc-600"
-                        }`}
-                        title={`${openString} string, fret ${fret}${label ? `: ${label}` : ""}`}
+                        } ${cagedData && !isBlockedByLevel ? "cursor-pointer" : "cursor-default"}`}
+                        title={`${stringLabel} string, fret ${fret}${label ? `: ${label}` : ""}${isInCagedPosition ? " (in selected box)" : ""}`}
                       >
-                        {isEnabled ? label : null}
+                        {isInCagedPosition ? label : null}
                         {markerVisible ? (
                           <span className="absolute h-1.5 w-1.5 rounded-full bg-zinc-600" />
                         ) : null}
-                      </div>
+                      </button>
                     );
                   })}
                 </Fragment>
@@ -105,8 +150,9 @@ export function FretboardMap({
         </div>
       </div>
       <p className="text-[11px] text-zinc-500">
-        Enabled notes are highlighted from the current key. Root tones are
-        amber; other enabled tones are blue.
+        Purple notes are inside the selected CAGED position. Click notes to
+        select the allowed generation pool (blue/amber). Gray notes are locked
+        by the current learning level.
       </p>
     </div>
   );

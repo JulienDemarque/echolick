@@ -2,8 +2,10 @@ import { Card, CardTitle } from '../../../components/ui/card'
 import { FretboardMap } from './FretboardMap'
 import {
   BLUES_FORM_OPTIONS,
-  DEGREE_OPTIONS,
+  CAGED_POSITION_OPTIONS,
+  GENERATOR_LEVEL_OPTIONS,
   type BluesFormId,
+  type CagedPositionId,
   type DegreeOptionId,
   type GeneratorLevelId,
   type NoteName,
@@ -18,18 +20,14 @@ type ConfigurationCardProps = {
   selectedBluesFormDescription: string
   generatorLevel: GeneratorLevelId
   onGeneratorLevelChange: (level: GeneratorLevelId) => void
-  effectiveIncludeMajorNotes: boolean
-  onIncludeMajorNotesChange: (checked: boolean) => void
-  isMajorBlues: boolean
-  allowBend: boolean
-  onAllowBendChange: (checked: boolean) => void
-  includeChordTones: boolean
-  onIncludeChordTonesChange: (checked: boolean) => void
+  selectedLevelDescription: string
   octaveSpan: OctaveSpanId
   onOctaveSpanChange: (span: OctaveSpanId) => void
-  enabledDegrees: DegreeOptionId[]
-  isMajorExtensionDegree: (degreeId: DegreeOptionId) => boolean
-  onToggleDegree: (degreeId: DegreeOptionId) => void
+  cagedPositionId: CagedPositionId
+  onCagedPositionChange: (value: CagedPositionId) => void
+  selectedFretboardMidis: number[]
+  onToggleFretboardMidi: (midi: number) => void
+  allowedDegrees: DegreeOptionId[]
   noteOrder: readonly NoteName[]
 }
 
@@ -41,18 +39,14 @@ export function ConfigurationCard({
   selectedBluesFormDescription,
   generatorLevel,
   onGeneratorLevelChange,
-  effectiveIncludeMajorNotes,
-  onIncludeMajorNotesChange,
-  isMajorBlues,
-  allowBend,
-  onAllowBendChange,
-  includeChordTones,
-  onIncludeChordTonesChange,
+  selectedLevelDescription,
   octaveSpan,
   onOctaveSpanChange,
-  enabledDegrees,
-  isMajorExtensionDegree,
-  onToggleDegree,
+  cagedPositionId,
+  onCagedPositionChange,
+  selectedFretboardMidis,
+  onToggleFretboardMidi,
+  allowedDegrees,
   noteOrder,
 }: ConfigurationCardProps) {
   return (
@@ -95,40 +89,36 @@ export function ConfigurationCard({
           onChange={(event) => onGeneratorLevelChange(event.target.value as GeneratorLevelId)}
           className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
         >
-          <option value="level-1">Level 1: root-minor3-fifth</option>
-          <option value="level-2">Level 2: add 4 and b7</option>
-          <option value="level-3">Level 3: add b5 and 2-beat rhythm values</option>
+          {GENERATOR_LEVEL_OPTIONS.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <span className="text-[11px] text-zinc-400">{selectedLevelDescription}</span>
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-zinc-300">
+        <span className="font-medium text-zinc-200">Fretboard Position (CAGED)</span>
+        <select
+          value={cagedPositionId}
+          onChange={(event) => onCagedPositionChange(event.target.value as CagedPositionId)}
+          className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
+        >
+          {CAGED_POSITION_OPTIONS.map((position) => (
+            <option key={position.id} value={position.id}>
+              {position.label}
+            </option>
+          ))}
         </select>
       </label>
-      <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
-        <input
-          type="checkbox"
-          checked={effectiveIncludeMajorNotes}
-          onChange={(event) => onIncludeMajorNotesChange(event.target.checked)}
-          disabled={!isMajorBlues}
-          className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
-        />
-        Add major-blues notes (2, 3, 6)
-      </label>
-      <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
-        <input
-          type="checkbox"
-          checked={allowBend}
-          onChange={(event) => onAllowBendChange(event.target.checked)}
-          className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
-        />
-        Include quarter bend on b3 (max one per bar)
-      </label>
-      <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
-        <input
-          type="checkbox"
-          checked={includeChordTones}
-          onChange={(event) => onIncludeChordTonesChange(event.target.checked)}
-          className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
-        />
-        Add current chord tones as targets
-      </label>
-      <FretboardMap activeKeyRoot={activeKeyRoot} enabledDegrees={enabledDegrees} noteOrder={noteOrder} />
+      <FretboardMap
+        activeKeyRoot={activeKeyRoot}
+        noteOrder={noteOrder}
+        cagedPositionId={cagedPositionId}
+        selectedMidis={selectedFretboardMidis}
+        onToggleMidi={onToggleFretboardMidi}
+        allowedDegrees={allowedDegrees}
+      />
       <label className="flex flex-col gap-1 text-xs text-zinc-300">
         <span className="font-medium text-zinc-200">Octave Span</span>
         <select
@@ -140,30 +130,6 @@ export function ConfigurationCard({
           <option value={2}>2 octaves max</option>
         </select>
       </label>
-      <div className="space-y-2">
-        <p className="text-xs font-medium text-zinc-200">Degree Pool (relative to song key)</p>
-        <div className="grid grid-cols-2 gap-2">
-          {DEGREE_OPTIONS.map((option) => {
-            const isEnabled = enabledDegrees.includes(option.id)
-            const isBlocked = !isMajorBlues && isMajorExtensionDegree(option.id)
-            return (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => onToggleDegree(option.id)}
-                disabled={isBlocked}
-                className={`rounded-md border px-2 py-2 text-xs font-medium transition ${
-                  isEnabled
-                    ? 'border-sky-400 bg-sky-500/20 text-sky-100'
-                    : 'border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-500'
-                } ${isBlocked ? 'cursor-not-allowed opacity-45' : ''}`}
-              >
-                {option.label}
-              </button>
-            )
-          })}
-        </div>
-      </div>
     </Card>
   )
 }
