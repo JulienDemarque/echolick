@@ -1355,3 +1355,53 @@ Copy this template for each chunk update:
   - Add chord-tone-specific visual accent in `FretboardMap` (separate from generic allowed-degree styling) so users can immediately distinguish harmonic targets.
 - Risks/blockers:
   - Fretboard note visibility is now chord-aware, but selected-note cleanup when changing bars still preserves existing selections; auto-pruning stale selections by new bar context could be added later if desired.
+
+### 2026-06-20 21:37 - CHUNK-GEN-SHAPE-TEMPLATE-NOTES-B
+- Status: done
+- Completed:
+  - Expanded CAGED template row coverage to a 6-fret span (anchored one fret lower than each row's previous minimum) so each box has slightly wider playable reach.
+  - Verified the requested practical target in key `A`, `1-e-shape`: `D` string fret `4` is now included in resolved shape notes.
+  - Added regression coverage for the harmonic scenario on `IV` (`D7`) at level-3, asserting the chord third (`F#`, degree `6` in key `A`) is visible and present in first-box notes.
+  - Re-ran frontend tests after the expansion.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator/shapeResolver.ts`
+  - `apps/frontend/src/features/practice/musicGenerator/shapeResolver.test.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.test.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - Add per-shape customization controls for span expansion (global 6-fret vs shape-specific overrides) if you want tighter pedagogical control.
+- Risks/blockers:
+  - A uniform span expansion can introduce more chromatic notes at box edges; this is filtered by level/chord visibility rules, but UX highlighting for "newly added edge tones" could help clarity.
+
+### 2026-06-20 21:43 - CHUNK-GEN-FIRST-BOX-ROOT-REGRESSION-A
+- Status: done
+- Completed:
+  - Added regression coverage for first-box root anchors on low E (`E6`) in keys `B` and `A`.
+  - Asserted that `1-e-shape` includes `E6` fret `7` for key `B` and `E6` fret `5` for key `A`, matching the expected highlighted targets.
+  - Ran targeted frontend tests and captured the current failing behavior (both new assertions fail).
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.test.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - Fix low-register filtering in shape resolution so valid first-box `E6` anchor notes (frets 5/7 cases) are retained for fretboard highlighting.
+- Risks/blockers:
+  - Current `resolveShapeNotesForKey` range guard (`MIN_PLAYABLE_MIDI = 50`) appears to exclude low-E roots like A2/B2, which likely causes these highlight misses.
+
+### 2026-06-20 21:50 - CHUNK-GEN-RANGE-SEPARATION-CLEANUP-A
+- Status: done
+- Completed:
+  - Removed MIDI-range filtering from `resolveShapeNotesForKey` so CAGED box resolution is purely fretboard-based (fixes missing low-E first-box anchors in UI).
+  - Kept generation register constraints by filtering resolved shape candidates in `createPermutationLick` to `50..82`.
+  - Replaced hardcoded generator range literals with `GENERATOR_MIN_MIDI` / `GENERATOR_MAX_MIDI` constants for clearer intent.
+  - Added regression test asserting generated lick notes remain in lead register while UI shape mapping includes lower notes.
+  - Re-ran targeted frontend tests (`musicGenerator` + `shapeResolver`) successfully.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator/shapeResolver.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.test.ts`
+  - `apps/frontend/src/features/practice/musicGenerator/shapeResolver.test.ts`
+  - `docs/TODO.md`
+- Next best step:
+  - Optional API cleanup pass: reduce test-only exports in `musicGenerator.ts` by importing those helpers directly from `shapeResolver` in tests.
+- Risks/blockers:
+  - If future UX expects generator to follow full visible box range, the separate generator register filter will need to be made configurable per level.

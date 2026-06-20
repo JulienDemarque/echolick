@@ -4,7 +4,6 @@ import {
   type BluesFormId,
   type GeneratorLevelId,
   type NoteName,
-  type OctaveSpanId,
   type CagedPositionId,
 } from '../features/practice/musicGenerator'
 import { advanceBar } from '../music/progression'
@@ -20,8 +19,6 @@ type AppState = {
   setBluesFormId: (value: BluesFormId) => void
   generatorLevel: GeneratorLevelId
   setGeneratorLevel: (value: GeneratorLevelId) => void
-  octaveSpan: OctaveSpanId
-  setOctaveSpan: (value: OctaveSpanId) => void
   cagedPositionId: CagedPositionId
   setCagedPositionId: (value: CagedPositionId) => void
   selectedFretboardMidis: number[]
@@ -43,8 +40,6 @@ export const useAppStore = create<AppState>((set) => ({
   setBluesFormId: (value) => set({ bluesFormId: value }),
   generatorLevel: 'level-1',
   setGeneratorLevel: (value) => set({ generatorLevel: value }),
-  octaveSpan: 1,
-  setOctaveSpan: (value) => set({ octaveSpan: value }),
   cagedPositionId: '3-c-shape-bb-king',
   setCagedPositionId: (value) => set({ cagedPositionId: value }),
   selectedFretboardMidis: [],

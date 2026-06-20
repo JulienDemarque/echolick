@@ -6,14 +6,14 @@ alwaysApply: true
 # Chunked Execution and Handoff
 
 - Break work into small chunks that can be completed in one session.
-- Use `docs/TODO.md` as the single source of truth for chunk status.
-- At the start of work, read `docs/TODO.md` and pick one `CHUNK-XX`.
+- Use `docs/TODO2.md` as the single source of truth for chunk status.
+- At the start of work, read `docs/TODO2.md` and pick one `CHUNK-XX`.
 - Do not run large multi-phase implementations in one pass unless explicitly requested.
-- After each chunk, update `docs/TODO.md`:
+- After each chunk, update `docs/TODO2.md`:
   - mark status
   - list files changed
   - write the next best step
   - note blockers/risks
 - Prefer resumable outputs over long explanations to reduce token usage.
-- When the user says they will switch threads, leave a clear handoff entry in `docs/TODO.md`.
+- When the user says they will switch threads, leave a clear handoff entry in `docs/TODO2.md`.
 - If chunk scope is unclear, propose 2-4 concrete chunk options and ask which to do now.

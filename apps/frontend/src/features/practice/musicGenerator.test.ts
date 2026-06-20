@@ -34,7 +34,6 @@ const degreesFromLick = (level: GeneratorLevelId, selectedPositionMidis: number[
     weightFlavor: config.weightFlavor,
     includeBend: false,
     includeChordTones: config.includeChordTones,
-    octaveSpan: 1,
     cagedPositionId: CAGED_POSITION,
     selectedPositionMidis,
   })
@@ -209,6 +208,55 @@ describe('musicGenerator helpers', () => {
 
     expect(level3Policy.allowedDegrees.includes('3')).toBe(false)
     expect(visibleDegrees).toContain('3')
+  })
+
+  it('shows IV chord major third in level-3 for A blues and first-box position note', () => {
+    const bar2 = buildBarContextFromForm(1, 'A', 'all-dominant')
+    expect(bar2.degree).toBe('IV')
+    expect(bar2.chord_symbol).toBe('D7')
+
+    const level3Policy = resolveGeneratorLevelPolicy('level-3')
+    const visibleDegrees = buildFretboardVisibleDegrees({
+      keyRoot: 'A',
+      allowedDegrees: level3Policy.allowedDegrees,
+      includeChordTones: level3Policy.includeChordTones,
+      chordSymbol: bar2.chord_symbol,
+    })
+    expect(visibleDegrees).toContain('6')
+
+    const firstBoxNotes = buildCagedPositionNotes('A', '1-e-shape')
+    const dStringFret4 = firstBoxNotes.find((note) => note.stringIndexFromLowE === 2 && note.fret === 4)
+    expect(dStringFret4?.degreeId).toBe('6')
+  })
+
+  it('shows V chord third (major 7 relative to key) in level-3 for A blues', () => {
+    const bar9 = buildBarContextFromForm(8, 'A', 'all-dominant')
+    expect(bar9.degree).toBe('V')
+    expect(bar9.chord_symbol).toBe('E7')
+
+    const level3Policy = resolveGeneratorLevelPolicy('level-3')
+    const visibleDegrees = buildFretboardVisibleDegrees({
+      keyRoot: 'A',
+      allowedDegrees: level3Policy.allowedDegrees,
+      includeChordTones: level3Policy.includeChordTones,
+      chordSymbol: bar9.chord_symbol,
+    })
+    // For E7 in key A, the chord third is G# (= major 7 degree relative to A).
+    expect(visibleDegrees).toContain('7' as (typeof visibleDegrees)[number])
+  })
+
+  it('includes E6 fret 7 in first box for key of B', () => {
+    const firstBoxNotes = buildCagedPositionNotes('B', '1-e-shape')
+    const e6StringFret7 = firstBoxNotes.find((note) => note.stringIndexFromLowE === 0 && note.fret === 7)
+    expect(e6StringFret7).toBeTruthy()
+    expect(e6StringFret7?.degreeId).toBe('1')
+  })
+
+  it('includes E6 fret 5 in first box for key of A', () => {
+    const firstBoxNotes = buildCagedPositionNotes('A', '1-e-shape')
+    const e6StringFret5 = firstBoxNotes.find((note) => note.stringIndexFromLowE === 0 && note.fret === 5)
+    expect(e6StringFret5).toBeTruthy()
+    expect(e6StringFret5?.degreeId).toBe('1')
   })
 
   it('isDegreeAllowedForLevel rejects unsupported chromatic degrees', () => {

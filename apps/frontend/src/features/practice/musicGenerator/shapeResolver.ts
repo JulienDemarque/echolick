@@ -6,8 +6,6 @@ const NOTE_NAMES: NoteName[] = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#',
 const TEMPLATE_OCTAVE_SHIFTS = [-12, 0, 12] as const
 const MIN_PLAYABLE_FRET = 0
 const MAX_PLAYABLE_FRET = 17
-const MIN_PLAYABLE_MIDI = 50
-const MAX_PLAYABLE_MIDI = 82
 
 const STRING_IDS_LOW_TO_HIGH = ['E6', 'A', 'D', 'G', 'B', 'E1'] as const
 const DEGREE_SEMITONE_MAP: Array<{ id: DegreeOptionId; semitones: number }> = [
@@ -20,10 +18,21 @@ const DEGREE_SEMITONE_MAP: Array<{ id: DegreeOptionId; semitones: number }> = [
   { id: '5', semitones: 7 },
   { id: '6', semitones: 9 },
   { id: 'b7', semitones: 10 },
+  { id: '7', semitones: 11 },
 ]
 const CHROMATIC_DEGREE_LABELS = ['1', 'b2', '2', 'b3', '3', '4', 'b5', '5', '#5', '6', 'b7', '7'] as const
+const BOX_SPAN_FRETS = 6
 
-const CAGED_SHAPE_TEMPLATE_POSITIONS_E: Record<CagedPositionId, Array<{ stringIndexFromLowE: number; positions: number[] }>> = {
+const expandRowToBoxSpan = (positions: number[]): number[] => {
+  const minOffset = Math.min(...positions)
+  const startOffset = minOffset - 1
+  return Array.from({ length: BOX_SPAN_FRETS }, (_, i) => startOffset + i)
+}
+
+const BASE_CAGED_SHAPE_TEMPLATE_POSITIONS_E: Record<
+  CagedPositionId,
+  Array<{ stringIndexFromLowE: number; positions: number[] }>
+> = {
   '1-e-shape': [
     { stringIndexFromLowE: 0, positions: [0, 1, 2, 3] },
     { stringIndexFromLowE: 1, positions: [0, 1, 2] },
@@ -65,6 +74,17 @@ const CAGED_SHAPE_TEMPLATE_POSITIONS_E: Record<CagedPositionId, Array<{ stringIn
     { stringIndexFromLowE: 5, positions: [10, 11, 12] },
   ],
 }
+
+const CAGED_SHAPE_TEMPLATE_POSITIONS_E: Record<CagedPositionId, Array<{ stringIndexFromLowE: number; positions: number[] }>> =
+  Object.fromEntries(
+    Object.entries(BASE_CAGED_SHAPE_TEMPLATE_POSITIONS_E).map(([shapeId, rows]) => [
+      shapeId,
+      rows.map((row) => ({
+        stringIndexFromLowE: row.stringIndexFromLowE,
+        positions: expandRowToBoxSpan(row.positions),
+      })),
+    ]),
+  ) as Record<CagedPositionId, Array<{ stringIndexFromLowE: number; positions: number[] }>>
 
 const noteNameToPitchClass = (note: NoteName): number => NOTE_NAMES.indexOf(note)
 const midiToPitchClass = (midi: number): number => ((Math.round(midi) % 12) + 12) % 12
@@ -114,7 +134,6 @@ export const resolveShapeNotesForKey = (keyRoot: NoteName, cagedPositionId: Cage
       const fret = templateNote.fretOffsetFromShapeRoot + semitoneShift + octaveShift
       if (fret < MIN_PLAYABLE_FRET || fret > MAX_PLAYABLE_FRET) return
       const midi = openMidi + fret
-      if (midi < MIN_PLAYABLE_MIDI || midi > MAX_PLAYABLE_MIDI) return
       const chromaticSemitoneFromKey = (midiToPitchClass(midi) - keyPitchClass + 12) % 12
       resolved.push({
         stringId: templateNote.stringId,

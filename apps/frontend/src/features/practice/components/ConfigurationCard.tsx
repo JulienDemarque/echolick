@@ -9,7 +9,6 @@ import {
   type DegreeOptionId,
   type GeneratorLevelId,
   type NoteName,
-  type OctaveSpanId,
 } from '../musicGenerator'
 
 type ConfigurationCardProps = {
@@ -21,8 +20,6 @@ type ConfigurationCardProps = {
   generatorLevel: GeneratorLevelId
   onGeneratorLevelChange: (level: GeneratorLevelId) => void
   selectedLevelDescription: string
-  octaveSpan: OctaveSpanId
-  onOctaveSpanChange: (span: OctaveSpanId) => void
   cagedPositionId: CagedPositionId
   onCagedPositionChange: (value: CagedPositionId) => void
   selectedFretboardMidis: number[]
@@ -40,8 +37,6 @@ export function ConfigurationCard({
   generatorLevel,
   onGeneratorLevelChange,
   selectedLevelDescription,
-  octaveSpan,
-  onOctaveSpanChange,
   cagedPositionId,
   onCagedPositionChange,
   selectedFretboardMidis,
@@ -119,17 +114,6 @@ export function ConfigurationCard({
         onToggleMidi={onToggleFretboardMidi}
         allowedDegrees={allowedDegrees}
       />
-      <label className="flex flex-col gap-1 text-xs text-zinc-300">
-        <span className="font-medium text-zinc-200">Octave Span</span>
-        <select
-          value={octaveSpan}
-          onChange={(event) => onOctaveSpanChange(Number(event.target.value) as OctaveSpanId)}
-          className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
-        >
-          <option value={1}>1 octave max</option>
-          <option value={2}>2 octaves max</option>
-        </select>
-      </label>
     </Card>
   )
 }

@@ -22,7 +22,6 @@ import {
   type BluesFormId,
   type CagedPositionId,
   type GeneratorLevelId,
-  type OctaveSpanId,
 } from './features/practice/musicGenerator'
 import {
   MAX_CAPTURE_BEATS,
@@ -54,8 +53,6 @@ function App() {
   const setBluesFormId = useAppStore((state) => state.setBluesFormId)
   const generatorLevel = useAppStore((state) => state.generatorLevel)
   const setGeneratorLevel = useAppStore((state) => state.setGeneratorLevel)
-  const octaveSpan = useAppStore((state) => state.octaveSpan)
-  const setOctaveSpan = useAppStore((state) => state.setOctaveSpan)
   const cagedPositionId = useAppStore((state) => state.cagedPositionId)
   const setCagedPositionId = useAppStore((state) => state.setCagedPositionId)
   const selectedFretboardMidis = useAppStore((state) => state.selectedFretboardMidis)
@@ -482,7 +479,6 @@ function App() {
         weightFlavor: selectedLevelConfig.weightFlavor,
         includeBend: true,
         includeChordTones: selectedLevelConfig.includeChordTones,
-        octaveSpan,
         cagedPositionId,
         selectedPositionMidis: selectedFretboardMidis,
       })
@@ -495,7 +491,6 @@ function App() {
       allowedDegreesForLevel,
       bluesFormId,
       generatorLevel,
-      octaveSpan,
       cagedPositionId,
       selectedLevelConfig.includeChordTones,
       selectedLevelConfig.weightFlavor,
@@ -683,13 +678,6 @@ function App() {
             generatorLevel={generatorLevel}
             onGeneratorLevelChange={onGeneratorLevelChange}
             selectedLevelDescription={selectedLevelDescription}
-            octaveSpan={octaveSpan}
-            onOctaveSpanChange={(span: OctaveSpanId) => {
-              stopAutoPractice()
-              setOctaveSpan(span)
-              clearGeneratedLicks()
-              setBarIndex(0)
-            }}
             cagedPositionId={cagedPositionId}
             onCagedPositionChange={(nextPosition: CagedPositionId) => {
               stopAutoPractice()

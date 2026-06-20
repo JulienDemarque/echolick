@@ -23,7 +23,14 @@ describe('shapeResolver', () => {
     const notes = resolveShapeNotesForKey('A', '1-e-shape')
     expect(notes.length).toBeGreaterThan(0)
     expect(notes.every((note) => note.fret >= 0 && note.fret <= 17)).toBe(true)
-    expect(notes.every((note) => note.midi >= 50 && note.midi <= 82)).toBe(true)
+    expect(notes.every((note) => note.midi >= 40 && note.midi <= 81)).toBe(true)
     expect(notes.every((note) => note.chromaticSemitoneFromKey >= 0 && note.chromaticSemitoneFromKey <= 11)).toBe(true)
+  })
+
+  it('includes D-string fret 4 in A key first box after 6-fret box expansion', () => {
+    const notes = resolveShapeNotesForKey('A', '1-e-shape')
+    const dStringFret4 = notes.find((note) => note.stringIndexFromLowE === 2 && note.fret === 4)
+    expect(dStringFret4).toBeTruthy()
+    expect(dStringFret4?.degreeId).toBe('6')
   })
 })
