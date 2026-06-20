@@ -1,6 +1,10 @@
 import type { FormBarResponse, GenerateLickResponse } from '../../api/client'
 import { BLUES_PROGRESSION } from '../../music/progression'
 import type { LickNote } from '../../types/music'
+import { buildIntervalPattern, buildIntervalWalkCandidateIndexes } from './musicGenerator/intervalWalk'
+import { ROOT_SCALE_WEIGHTS, scoreDegreeCandidate } from './musicGenerator/melodicScoring'
+import { pickWeightedRandom } from './musicGenerator/randomUtils'
+import { buildRhythmPattern, isStrongBeat } from './musicGenerator/rhythm'
 import { CAGED_SHAPE_TEMPLATE_NOTES_E, getSemitoneShiftFromE, resolveShapeNotesForKey } from './musicGenerator/shapeResolver'
 import type {
   BluesFormId,
@@ -27,32 +31,6 @@ export const CAGED_POSITION_OPTIONS: Array<{ id: CagedPositionId; label: string;
   { id: '4-a-shape', label: '4th Box (A shape)', description: 'Upper-mid register position.' },
   { id: '5-g-shape', label: '5th Box (G shape)', description: 'Highest common CAGED box in this range.' },
 ]
-const ROOT_SCALE_WEIGHTS: Record<'major' | 'minor', Record<DegreeOptionId, number>> = {
-  major: {
-    '1': 1.55,
-    '2': 1.08,
-    b3: 0.9,
-    '3': 1.28,
-    '4': 1.0,
-    b5: 0.82,
-    '5': 1.42,
-    '6': 1.16,
-    b7: 1.18,
-    '7': 0.96,
-  },
-  minor: {
-    '1': 1.55,
-    '2': 1.02,
-    b3: 1.36,
-    '3': 0.74,
-    '4': 1.14,
-    b5: 1.02,
-    '5': 1.4,
-    '6': 1.2,
-    b7: 1.26,
-    '7': 0.72,
-  },
-}
 
 export const DEGREE_OPTIONS: Array<{ id: DegreeOptionId; label: string; semitones: number }> = [
   { id: '1', label: '1 (do)', semitones: 0 },
@@ -197,20 +175,6 @@ const midiToNoteNameWithOctave = (midi: number): string => {
   const pitchClass = midiToPitchClass(midi)
   const octave = Math.floor(midi / 12) - 1
   return `${NOTE_NAMES[pitchClass] ?? 'C'}${octave}`
-}
-const pickRandom = <T,>(items: T[]): T => items[Math.floor(Math.random() * items.length)]
-const pickWeightedRandom = <T,>(items: Array<{ value: T; weight: number }>): T => {
-  const totalWeight = items.reduce((sum, item) => sum + Math.max(0, item.weight), 0)
-  if (totalWeight <= 0) {
-    return items[Math.floor(Math.random() * items.length)]!.value
-  }
-  let cursor = Math.random() * totalWeight
-  for (let i = 0; i < items.length; i += 1) {
-    const item = items[i]!
-    cursor -= Math.max(0, item.weight)
-    if (cursor <= 0) return item.value
-  }
-  return items[items.length - 1]!.value
 }
 
 const buildDegreeMidiCandidates = (keyRoot: NoteName, degreeId: DegreeOptionId): number[] => {
@@ -388,86 +352,6 @@ export const buildLevelCandidatePool = ({
   }
 }
 
-const isStrongBeat = (beatStart: number): boolean => {
-  const rounded = Math.round(beatStart)
-  const closeToGrid = Math.abs(beatStart - rounded) < 0.001
-  return closeToGrid && (rounded === 0 || rounded === 2)
-}
-
-const scoreDegreeCandidate = ({
-  nearestMidi,
-  previousMidi,
-  previousDirection,
-  isChordTone,
-  onStrongBeat,
-  previousDegree,
-  degreeId,
-  chordQuality,
-  intervalFromChordRoot,
-  rootScaleWeight,
-}: {
-  nearestMidi: number
-  previousMidi: number
-  previousDirection: -1 | 0 | 1
-  isChordTone: boolean
-  onStrongBeat: boolean
-  previousDegree: DegreeOptionId | null
-  degreeId: DegreeOptionId
-  chordQuality: ChordQuality
-  intervalFromChordRoot: number
-  rootScaleWeight: number
-}): number => {
-  const delta = nearestMidi - previousMidi
-  const distance = Math.abs(delta)
-  const candidateDirection: -1 | 0 | 1 = delta > 0 ? 1 : delta < 0 ? -1 : 0
-  const movementWeight = distance <= 2 ? 2.35 : distance <= 4 ? 1.75 : distance <= 7 ? 1.08 : 0.56
-  const directionWeight =
-    previousDirection === 0 || candidateDirection === 0
-      ? candidateDirection === 0
-        ? 0.86
-        : 1
-      : previousDirection === candidateDirection
-        ? distance <= 3
-          ? 1.24
-          : 0.92
-        : distance <= 2
-          ? 1.08
-          : 0.78
-  const chordToneWeight = isChordTone ? (onStrongBeat ? 2.3 : 1.55) : onStrongBeat ? 0.66 : 1.0
-  const repeatPenalty = previousDegree === degreeId ? 0.82 : 1
-  const avoidWeight =
-    chordQuality === 'minor7' && intervalFromChordRoot === 4
-      ? 0.08
-      : chordQuality === 'dominant7' && intervalFromChordRoot === 11
-        ? 0.35
-        : chordQuality === 'major7' && intervalFromChordRoot === 10
-          ? 0.45
-          : chordQuality === 'dim7' && intervalFromChordRoot === 7
-            ? 0.6
-            : 1
-  const colorWeight =
-    chordQuality === 'minor7' && intervalFromChordRoot === 9
-      ? 1.32
-      : chordQuality === 'dominant7' && (intervalFromChordRoot === 3 || intervalFromChordRoot === 6)
-        ? 1.15
-        : 1
-  return movementWeight * directionWeight * chordToneWeight * repeatPenalty * avoidWeight * colorWeight * rootScaleWeight
-}
-
-const buildRhythmPattern = (allowedDurations: number[]): number[] => {
-  const durations: number[] = []
-  let remaining = 4
-  while (remaining > 0) {
-    const options = allowedDurations.filter((duration) => duration <= remaining + 1e-6)
-    if (options.length === 0) break
-    const preferred = options.filter((duration) => duration === 1)
-    const selected = preferred.length > 0 && Math.random() < 0.55 ? pickRandom(preferred) : pickRandom(options)
-    durations.push(selected)
-    remaining = Math.max(0, Number((remaining - selected).toFixed(2)))
-  }
-  return durations
-}
-
 export const normalizeLickNotes = (notes: GenerateLickResponse['notes']): LickNote[] =>
   notes.map((note) => ({
     ...note,
@@ -551,48 +435,42 @@ export const createPermutationLick = ({
   const effectiveDegrees = Array.from(new Set(melodicCandidates.map((candidate) => candidate.degreeId)))
 
   const targetDegrees: Array<DegreeOptionId | null> = []
-  type MelodicTarget = { kind: 'position'; midi: number; degreeId: DegreeOptionId }
-
   let cursor = 0
-  let previousMidi = chordRootMidi
-  let previousDirection: -1 | 0 | 1 = 0
-  let previousDegree: DegreeOptionId | null = null
-  durations.forEach((duration) => {
-    const onStrongBeat = isStrongBeat(cursor)
-    const weightedTargets: Array<{ value: MelodicTarget; weight: number }> = []
-    melodicCandidates.forEach((candidate) => {
-      const candidateIsChordTone = chordTonePitchClasses.has(midiToPitchClass(candidate.midi))
-      const intervalFromChordRoot = (midiToPitchClass(candidate.midi) - chordRootPitchClass + 12) % 12
-      const degreeWeight = ROOT_SCALE_WEIGHTS[weightFlavor][candidate.degreeId]
-      let weight = scoreDegreeCandidate({
-        nearestMidi: candidate.midi,
-        previousMidi,
-        previousDirection,
-        isChordTone: candidateIsChordTone,
-        onStrongBeat,
-        previousDegree,
-        degreeId: candidate.degreeId,
-        chordQuality,
-        intervalFromChordRoot,
-        rootScaleWeight: degreeWeight,
-      })
-      if (includeChordTones && candidateIsChordTone) {
-        weight *= 1.22
-      }
-      if (!includeChordTones && candidateIsChordTone) {
-        weight *= 0.92
-      }
-      weightedTargets.push({ value: { kind: 'position', midi: candidate.midi, degreeId: candidate.degreeId }, weight })
+  const weightedStartTargets = melodicCandidates.map((candidate) => {
+    const candidateIsChordTone = chordTonePitchClasses.has(midiToPitchClass(candidate.midi))
+    const intervalFromChordRoot = (midiToPitchClass(candidate.midi) - chordRootPitchClass + 12) % 12
+    const degreeWeight = ROOT_SCALE_WEIGHTS[weightFlavor][candidate.degreeId]
+    let weight = scoreDegreeCandidate({
+      nearestMidi: candidate.midi,
+      previousMidi: chordRootMidi,
+      previousDirection: 0,
+      isChordTone: candidateIsChordTone,
+      onStrongBeat: true,
+      previousDegree: null,
+      degreeId: candidate.degreeId,
+      chordQuality,
+      intervalFromChordRoot,
+      rootScaleWeight: degreeWeight,
     })
-
-    const selectedTarget = pickWeightedRandom<MelodicTarget>(weightedTargets)
-    const degreeId = selectedTarget.degreeId
-    targetDegrees.push(degreeId)
-    const midi = selectedTarget.midi
-    const delta = midi - previousMidi
-    previousDirection = delta > 0 ? 1 : delta < 0 ? -1 : 0
-    previousMidi = midi
-    previousDegree = degreeId
+    if (includeChordTones && candidateIsChordTone) {
+      weight *= 1.12
+    }
+    return { value: candidate, weight }
+  })
+  const startingCandidate = pickWeightedRandom(weightedStartTargets)
+  const startingIndex = melodicCandidates.findIndex((candidate) => candidate.midi === startingCandidate.midi)
+  const intervalPattern = buildIntervalPattern()
+  const candidateIndexes = buildIntervalWalkCandidateIndexes({
+    totalNotes: durations.length,
+    candidateCount: melodicCandidates.length,
+    startingIndex: startingIndex >= 0 ? startingIndex : 0,
+    intervalPattern,
+  })
+  durations.forEach((duration, noteIndex) => {
+    const candidate = melodicCandidates[candidateIndexes[noteIndex] ?? 0]
+    if (!candidate) return
+    targetDegrees.push(candidate.degreeId)
+    const midi = candidate.midi
     notes.push({
       midi,
       noteName: midiToNoteNameWithOctave(midi),

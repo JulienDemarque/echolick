@@ -4,7 +4,7 @@ Use this file as the shared handoff anchor between chat threads.
 
 ## Current Chunk
 
-- [x] CHUNK-LEVEL-PRESETS-UPDATE-A: Update level 1/2 degree sets to pentatonic and pentatonic+blue note.
+- [x] CHUNK-UX-FRETBOARD-OVERLAYS-A: Add optional fretboard overlays for chord tones and active playback notes.
 
 ## Next Chunks
 
@@ -123,3 +123,63 @@ Copy this template for each chunk update:
   - Add one explicit assertion that `b5` appears in level-2 output across repeated runs (probabilistic with retries).
 - Risks/blockers:
   - Since generation is weighted/random, presence of `b5` in a single short run is not guaranteed; tests should check allowed set and use multiple samples for coverage.
+
+### 2026-06-20 22:34 - CHUNK-GEN-INTERVAL-WALK-A
+- Status: done
+- Completed:
+  - Replaced per-note independent weighted target picking with an interval-pattern walk over the sorted candidate-note pool.
+  - Added weighted interval-pattern selection favoring small steps and weighted start-note selection.
+  - Added boundary reflection so interval walking stays inside the selected note pool without out-of-range wrapping jumps.
+  - Added regression coverage to assert generated adjacent melodic jumps stay within one octave.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.test.ts`
+  - `docs/TODO2.md`
+- Next best step:
+  - Tune interval-step weights and pattern length per level (e.g. tighter level-1, looser level-3) based on playtesting feel.
+- Risks/blockers:
+  - In very sparse selected-note pools, reflected index walking can create repetitive back-and-forth contours; consider occasional pattern reseeding per bar if needed.
+
+### 2026-06-20 22:37 - CHUNK-GEN-MODULE-SPLIT-A
+- Status: done
+- Completed:
+  - Extracted weighted random helpers into `musicGenerator/randomUtils.ts`.
+  - Extracted interval-walk generation and index reflection helpers into `musicGenerator/intervalWalk.ts`.
+  - Extracted rhythm/strong-beat helpers into `musicGenerator/rhythm.ts`.
+  - Extracted melodic scoring and root-scale weights into `musicGenerator/melodicScoring.ts`.
+  - Refactored `musicGenerator.ts` to consume extracted modules without changing the public generator API.
+  - Added direct tests for interval-walk and rhythm helper modules.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/features/practice/musicGenerator/randomUtils.ts`
+  - `apps/frontend/src/features/practice/musicGenerator/intervalWalk.ts`
+  - `apps/frontend/src/features/practice/musicGenerator/rhythm.ts`
+  - `apps/frontend/src/features/practice/musicGenerator/melodicScoring.ts`
+  - `apps/frontend/src/features/practice/musicGenerator/intervalWalk.test.ts`
+  - `apps/frontend/src/features/practice/musicGenerator/rhythm.test.ts`
+  - `docs/TODO2.md`
+- Next best step:
+  - Split chord/form-resolution helpers out of `musicGenerator.ts` into a `harmony` module and add focused tests.
+- Risks/blockers:
+  - Cross-module boundaries are now cleaner, but the top-level file still owns both orchestration and multiple exported APIs; further split should preserve import ergonomics.
+
+### 2026-06-20 22:41 - CHUNK-UX-FRETBOARD-OVERLAYS-A
+- Status: done
+- Completed:
+  - Added two optional UI checkboxes in configuration: show current chord tones and show lick notes during playback.
+  - Added Zustand flags/setters for both toggles with non-intrusive defaults (`false`).
+  - Added chord-tone fretboard overlay styling (orange) driven by current bar chord pitch classes.
+  - Added active playback overlay styling (green) by tracking currently sounding lick notes during listen-phase playback.
+  - Added pure helper `getActiveLickMidisAtBeat` and tests for timing boundaries/dedup behavior.
+- Files changed:
+  - `apps/frontend/src/App.tsx`
+  - `apps/frontend/src/store/useAppStore.ts`
+  - `apps/frontend/src/features/practice/components/ConfigurationCard.tsx`
+  - `apps/frontend/src/features/practice/components/FretboardMap.tsx`
+  - `apps/frontend/src/features/practice/fretboardPlayback.ts`
+  - `apps/frontend/src/features/practice/fretboardPlayback.test.ts`
+  - `docs/TODO2.md`
+- Next best step:
+  - Add a lightweight component test for fretboard style precedence (playing note > selected > chord tone > base).
+- Risks/blockers:
+  - Playback overlay timing is synced to UI/metronome start delay; browser scheduling jitter can still make highlights slightly ahead/behind audio on slower devices.

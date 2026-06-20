@@ -15,6 +15,10 @@ type FretboardMapProps = {
   selectedMidis: number[];
   onToggleMidi: (midi: number) => void;
   allowedDegrees: DegreeOptionId[];
+  showChordTones: boolean;
+  chordTonePitchClasses: Set<number>;
+  showPlayingLick: boolean;
+  playingLickMidis: number[];
 };
 
 const STRINGS_LOW_TO_HIGH: NoteName[] = ["E", "A", "D", "G", "B", "E"];
@@ -44,9 +48,14 @@ export function FretboardMap({
   selectedMidis,
   onToggleMidi,
   allowedDegrees,
+  showChordTones,
+  chordTonePitchClasses,
+  showPlayingLick,
+  playingLickMidis,
 }: FretboardMapProps) {
   const rootPitchClass = noteOrder.indexOf(activeKeyRoot);
   const selectedSet = new Set(selectedMidis.map((midi) => Math.round(midi)));
+  const playingSet = new Set(playingLickMidis.map((midi) => Math.round(midi)));
   const cagedNotes = buildCagedPositionNotes(activeKeyRoot, cagedPositionId);
   const cagedNoteByPosition = new Map<
     string,
@@ -108,6 +117,12 @@ export function FretboardMap({
                     const isSelected = cagedData
                       ? selectedSet.has(Math.round(cagedData.midi))
                       : false;
+                    const roundedMidi = cagedData ? Math.round(cagedData.midi) : null;
+                    const isPlaying = showPlayingLick && roundedMidi !== null && playingSet.has(roundedMidi);
+                    const isChordTone =
+                      showChordTones &&
+                      cagedData !== null &&
+                      chordTonePitchClasses.has(((Math.round(cagedData.midi) % 12) + 12) % 12);
                     const isRoot = effectiveDegree === "1";
                     const markerVisible = FRET_MARKERS.has(fret) && !isInCagedPosition;
                     const label = effectiveDegree
@@ -127,10 +142,14 @@ export function FretboardMap({
                           isBlockedByLevel && isInCagedPosition
                             ? "border-zinc-700 bg-zinc-900 text-zinc-500"
                           :
-                          isSelected && isInCagedPosition
+                          isPlaying && isInCagedPosition
+                            ? "border-emerald-300 bg-emerald-500/30 text-emerald-50"
+                          : isSelected && isInCagedPosition
                             ? isRoot
                               ? "border-amber-300 bg-amber-400/25 text-amber-100"
                               : "border-sky-400 bg-sky-500/20 text-sky-100"
+                            : isChordTone && isInCagedPosition
+                              ? "border-amber-400 bg-amber-500/20 text-amber-100"
                             : isInCagedPosition
                               ? "border-violet-500/80 bg-violet-500/15 text-violet-100"
                             : "border-zinc-800 bg-zinc-900/80 text-zinc-600"
@@ -152,7 +171,8 @@ export function FretboardMap({
       <p className="text-[11px] text-zinc-500">
         Purple notes are inside the selected CAGED position. Click notes to
         select the allowed generation pool (blue/amber). Gray notes are locked
-        by the current learning level.
+        by the current learning level. Orange notes are chord tones. Green notes
+        are active during lick playback.
       </p>
     </div>
   );

@@ -26,6 +26,12 @@ type ConfigurationCardProps = {
   onToggleFretboardMidi: (midi: number) => void
   allowedDegrees: DegreeOptionId[]
   noteOrder: readonly NoteName[]
+  showChordTonesOnFretboard: boolean
+  onShowChordTonesOnFretboardChange: (value: boolean) => void
+  showPlayingLickOnFretboard: boolean
+  onShowPlayingLickOnFretboardChange: (value: boolean) => void
+  chordTonePitchClasses: Set<number>
+  playingLickMidis: number[]
 }
 
 export function ConfigurationCard({
@@ -43,6 +49,12 @@ export function ConfigurationCard({
   onToggleFretboardMidi,
   allowedDegrees,
   noteOrder,
+  showChordTonesOnFretboard,
+  onShowChordTonesOnFretboardChange,
+  showPlayingLickOnFretboard,
+  onShowPlayingLickOnFretboardChange,
+  chordTonePitchClasses,
+  playingLickMidis,
 }: ConfigurationCardProps) {
   return (
     <Card className="flex h-full flex-col space-y-3">
@@ -106,6 +118,24 @@ export function ConfigurationCard({
           ))}
         </select>
       </label>
+      <label className="flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={showChordTonesOnFretboard}
+          onChange={(event) => onShowChordTonesOnFretboardChange(event.target.checked)}
+          className="h-4 w-4 rounded border-zinc-600 bg-zinc-950 text-amber-400 focus:ring-amber-400"
+        />
+        <span>Show current chord tones</span>
+      </label>
+      <label className="flex items-center gap-2 text-xs text-zinc-300">
+        <input
+          type="checkbox"
+          checked={showPlayingLickOnFretboard}
+          onChange={(event) => onShowPlayingLickOnFretboardChange(event.target.checked)}
+          className="h-4 w-4 rounded border-zinc-600 bg-zinc-950 text-emerald-400 focus:ring-emerald-400"
+        />
+        <span>Show lick on fretboard while it plays</span>
+      </label>
       <FretboardMap
         activeKeyRoot={activeKeyRoot}
         noteOrder={noteOrder}
@@ -113,6 +143,10 @@ export function ConfigurationCard({
         selectedMidis={selectedFretboardMidis}
         onToggleMidi={onToggleFretboardMidi}
         allowedDegrees={allowedDegrees}
+        showChordTones={showChordTonesOnFretboard}
+        chordTonePitchClasses={chordTonePitchClasses}
+        showPlayingLick={showPlayingLickOnFretboard}
+        playingLickMidis={playingLickMidis}
       />
     </Card>
   )

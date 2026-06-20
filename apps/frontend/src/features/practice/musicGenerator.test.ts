@@ -324,4 +324,27 @@ describe('createPermutationLick level constraints', () => {
     })
     expect(pool.finalCandidates.length).toBeGreaterThan(pool.narrowedBaseCandidates.length)
   })
+
+  it('uses interval-pattern walking to avoid extreme melodic jumps', () => {
+    const config = resolveGeneratorLevelPolicy('level-2')
+    for (let i = 0; i < 24; i += 1) {
+      const lick = createPermutationLick({
+        keyRoot: KEY_ROOT,
+        chordSymbol: 'E7',
+        degree: 'I',
+        tempo: 76,
+        level: 'level-2',
+        allowedDegrees: config.allowedDegrees,
+        weightFlavor: config.weightFlavor,
+        includeBend: false,
+        includeChordTones: config.includeChordTones,
+        cagedPositionId: CAGED_POSITION,
+        selectedPositionMidis: [],
+      })
+      for (let n = 1; n < lick.notes.length; n += 1) {
+        const leap = Math.abs(lick.notes[n]!.midi - lick.notes[n - 1]!.midi)
+        expect(leap).toBeLessThanOrEqual(12)
+      }
+    }
+  })
 })

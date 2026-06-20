@@ -24,6 +24,10 @@ type AppState = {
   selectedFretboardMidis: number[]
   setSelectedFretboardMidis: (value: number[]) => void
   toggleSelectedFretboardMidi: (value: number) => void
+  showChordTonesOnFretboard: boolean
+  setShowChordTonesOnFretboard: (value: boolean) => void
+  showPlayingLickOnFretboard: boolean
+  setShowPlayingLickOnFretboard: (value: boolean) => void
   generatedLickByBar: Record<number, GenerateLickResponse>
   setGeneratedLickForBar: (barIndex: number, lick: GenerateLickResponse) => void
   clearGeneratedLicks: () => void
@@ -50,6 +54,10 @@ export const useAppStore = create<AppState>((set) => ({
         ? state.selectedFretboardMidis.filter((midi) => midi !== value)
         : [...state.selectedFretboardMidis, value],
     })),
+  showChordTonesOnFretboard: false,
+  setShowChordTonesOnFretboard: (value) => set({ showChordTonesOnFretboard: value }),
+  showPlayingLickOnFretboard: false,
+  setShowPlayingLickOnFretboard: (value) => set({ showPlayingLickOnFretboard: value }),
   generatedLickByBar: {},
   setGeneratedLickForBar: (barIndex, lick) =>
     set((state) => ({ generatedLickByBar: { ...state.generatedLickByBar, [barIndex]: lick } })),

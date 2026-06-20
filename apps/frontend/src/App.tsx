@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type GenerateLickResponse } from './api/client'
 import { playLickOverChord, stopLickPlayback } from './audio/bluesPrototype'
 import { ConfigurationCard } from './features/practice/components/ConfigurationCard'
+import { getActiveLickMidisAtBeat } from './features/practice/fretboardPlayback'
 import { MetronomeCard } from './features/practice/components/MetronomeCard'
 import { ProgressionCard } from './features/practice/components/ProgressionCard'
 import { SelectedLickCard } from './features/practice/components/SelectedLickCard'
@@ -18,6 +19,7 @@ import {
   isDegreeAllowedForLevel,
   normalizeLickNotes,
   resolveChordMidi,
+  resolveChordTonePitchClassesForSymbol,
   resolvePracticeDegreeFromLabel,
   type BluesFormId,
   type CagedPositionId,
@@ -58,6 +60,10 @@ function App() {
   const selectedFretboardMidis = useAppStore((state) => state.selectedFretboardMidis)
   const setSelectedFretboardMidis = useAppStore((state) => state.setSelectedFretboardMidis)
   const toggleSelectedFretboardMidi = useAppStore((state) => state.toggleSelectedFretboardMidi)
+  const showChordTonesOnFretboard = useAppStore((state) => state.showChordTonesOnFretboard)
+  const setShowChordTonesOnFretboard = useAppStore((state) => state.setShowChordTonesOnFretboard)
+  const showPlayingLickOnFretboard = useAppStore((state) => state.showPlayingLickOnFretboard)
+  const setShowPlayingLickOnFretboard = useAppStore((state) => state.setShowPlayingLickOnFretboard)
   const generatedLickByBar = useAppStore((state) => state.generatedLickByBar)
   const setGeneratedLickForBar = useAppStore((state) => state.setGeneratedLickForBar)
   const clearGeneratedLicks = useAppStore((state) => state.clearGeneratedLicks)
@@ -68,7 +74,11 @@ function App() {
   const [micStatus, setMicStatus] = useState<MicStatus>('off')
   const [micError, setMicError] = useState<string>('')
   const [userPitchPoints, setUserPitchPoints] = useState<PitchPoint[]>([])
+  const [activePlaybackMidis, setActivePlaybackMidis] = useState<number[]>([])
   const metronomeTimeoutsRef = useRef<number[]>([])
+  const playbackOverlayRafRef = useRef<number | null>(null)
+  const playbackOverlayStartMsRef = useRef<number | null>(null)
+  const playbackOverlayLastSignatureRef = useRef<string>('')
   const micStreamRef = useRef<MediaStream | null>(null)
   const micAudioContextRef = useRef<AudioContext | null>(null)
   const micAnalyserRef = useRef<AnalyserNode | null>(null)
@@ -102,6 +112,10 @@ function App() {
   const currentBarContext = activeBars[safeBarIndex] ?? buildBarContextFromForm(0, activeKeyRoot, bluesFormId)
   const currentDegree = currentBarContext.degree
   const currentChord = currentBarContext.chord_symbol
+  const currentChordTonePitchClasses = useMemo(
+    () => resolveChordTonePitchClassesForSymbol(currentChord),
+    [currentChord],
+  )
   const visibleDegreesForFretboard = useMemo(
     () =>
       buildFretboardVisibleDegrees({
@@ -193,6 +207,15 @@ function App() {
     captureWindowStartMsRef.current = null
     smoothedMidiRef.current = null
     setMicStatus(micAnalyserRef.current ? 'ready' : 'off')
+  }, [])
+  const stopPlaybackOverlayLoop = useCallback(() => {
+    if (playbackOverlayRafRef.current !== null) {
+      window.cancelAnimationFrame(playbackOverlayRafRef.current)
+      playbackOverlayRafRef.current = null
+    }
+    playbackOverlayStartMsRef.current = null
+    playbackOverlayLastSignatureRef.current = ''
+    setActivePlaybackMidis([])
   }, [])
 
   const ensureMetronomeAudioContext = () => {
@@ -335,9 +358,10 @@ function App() {
     isPlaybackRunningRef.current = false
     stopLickPlayback()
     stopPitchCaptureLoop()
+    stopPlaybackOverlayLoop()
     setActiveBeat(null)
     setPracticePhase('idle')
-  }, [stopPitchCaptureLoop])
+  }, [stopPitchCaptureLoop, stopPlaybackOverlayLoop])
 
   const startPracticeCycle = (tempo: number, onComplete?: () => void) => {
     clearMetronome()
@@ -390,6 +414,7 @@ function App() {
       metronomeTimeoutsRef.current = []
       stopLickPlayback()
       stopPitchCaptureLoop()
+      stopPlaybackOverlayLoop()
       micSourceRef.current?.disconnect()
       micAnalyserRef.current?.disconnect()
       micSourceRef.current = null
@@ -406,7 +431,7 @@ function App() {
       }
       metronomeAudioContextRef.current = null
     },
-    [stopPitchCaptureLoop],
+    [stopPitchCaptureLoop, stopPlaybackOverlayLoop],
   )
 
   const pitchRange = useMemo(() => {
@@ -503,15 +528,40 @@ function App() {
     (lick: GenerateLickResponse, onCycleComplete?: () => void) => {
       setAudioError('')
       startPracticeCycleRef.current(lick.tempo, onCycleComplete)
+      const normalizedNotes = normalizeLickNotes(lick.notes)
+      const beatMs = (60 / lick.tempo) * 1000
+      stopPlaybackOverlayLoop()
+      playbackOverlayStartMsRef.current = window.performance.now() + PLAYBACK_START_DELAY_MS
+      const updatePlaybackOverlay = () => {
+        const overlayStartMs = playbackOverlayStartMsRef.current
+        if (overlayStartMs === null) return
+        const elapsedBeats = (window.performance.now() - overlayStartMs) / beatMs
+        if (elapsedBeats < 0) {
+          playbackOverlayRafRef.current = window.requestAnimationFrame(updatePlaybackOverlay)
+          return
+        }
+        if (elapsedBeats > 4) {
+          stopPlaybackOverlayLoop()
+          return
+        }
+        const activeMidis = getActiveLickMidisAtBeat(normalizedNotes, elapsedBeats)
+        const signature = activeMidis.join(',')
+        if (signature !== playbackOverlayLastSignatureRef.current) {
+          playbackOverlayLastSignatureRef.current = signature
+          setActivePlaybackMidis(activeMidis)
+        }
+        playbackOverlayRafRef.current = window.requestAnimationFrame(updatePlaybackOverlay)
+      }
+      playbackOverlayRafRef.current = window.requestAnimationFrame(updatePlaybackOverlay)
       void playLickOverChord({
         tempo: lick.tempo,
         chordMidi: resolveChordMidi(lick.chord),
-        notes: normalizeLickNotes(lick.notes),
+        notes: normalizedNotes,
       }).catch((e) => {
         setAudioError(e instanceof Error ? e.message : 'Failed to play generated lick')
       })
     },
-    [],
+    [stopPlaybackOverlayLoop],
   )
 
   const playBar = useCallback(
@@ -693,6 +743,12 @@ function App() {
             }}
             allowedDegrees={visibleDegreesForFretboard}
             noteOrder={NOTE_ORDER}
+            showChordTonesOnFretboard={showChordTonesOnFretboard}
+            onShowChordTonesOnFretboardChange={setShowChordTonesOnFretboard}
+            showPlayingLickOnFretboard={showPlayingLickOnFretboard}
+            onShowPlayingLickOnFretboardChange={setShowPlayingLickOnFretboard}
+            chordTonePitchClasses={currentChordTonePitchClasses}
+            playingLickMidis={activePlaybackMidis}
           />
         </div>
       </div>
