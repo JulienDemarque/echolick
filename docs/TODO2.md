@@ -4,7 +4,7 @@ Use this file as the shared handoff anchor between chat threads.
 
 ## Current Chunk
 
-- [x] CHUNK-UX-V7-THIRD-HIGHLIGHT-FIX-A: Add degree-7 support so V7 chord third is visible in level-3.
+- [x] CHUNK-LEVEL-PRESETS-UPDATE-A: Update level 1/2 degree sets to pentatonic and pentatonic+blue note.
 
 ## Next Chunks
 
@@ -94,3 +94,32 @@ Copy this template for each chunk update:
   - Add an explicit UI test around fretboard label rendering for `7` when V7 is active.
 - Risks/blockers:
   - `7` is now available in global degree typing; if you later want strict pedagogical limits per level, enforce that only through level/chord visibility policy (not via type exclusion).
+
+### 2026-06-20 22:21 - CHUNK-DEFAULTS-KEY-BOX-A
+- Status: done
+- Completed:
+  - Updated app defaults so practice starts in key `A`.
+  - Updated default CAGED position to `1-e-shape` (1st box).
+- Files changed:
+  - `apps/frontend/src/store/useAppStore.ts`
+  - `docs/TODO2.md`
+- Next best step:
+  - Add a lightweight UI smoke test asserting initial configuration defaults in rendered controls.
+- Risks/blockers:
+  - Existing user-saved state (if persisted elsewhere in future) could override these defaults at runtime.
+
+### 2026-06-20 22:23 - CHUNK-LEVEL-PRESETS-UPDATE-A
+- Status: done
+- Completed:
+  - Updated level presets so `level-1` is full minor pentatonic (`1, b3, 4, 5, b7`).
+  - Updated `level-2` to minor pentatonic + blue note (`1, b3, 4, b5, 5, b7`).
+  - Updated level labels/descriptions to match the new behavior.
+  - Updated level-constraint tests and verified targeted test suite passes.
+- Files changed:
+  - `apps/frontend/src/features/practice/musicGenerator.ts`
+  - `apps/frontend/src/features/practice/musicGenerator.test.ts`
+  - `docs/TODO2.md`
+- Next best step:
+  - Add one explicit assertion that `b5` appears in level-2 output across repeated runs (probabilistic with retries).
+- Risks/blockers:
+  - Since generation is weighted/random, presence of `b5` in a single short run is not guaranteed; tests should check allowed set and use multiple samples for coverage.

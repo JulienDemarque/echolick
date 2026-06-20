@@ -72,8 +72,8 @@ const DEGREE_OPTION_MAP = Object.fromEntries(DEGREE_OPTIONS.map((item) => [item.
 >
 
 export const DEGREE_LEVEL_PRESETS: Record<GeneratorLevelId, DegreeOptionId[]> = {
-  'level-1': ['1', 'b3', '5'],
-  'level-2': ['1', 'b3', '4', '5', 'b7'],
+  'level-1': ['1', 'b3', '4', '5', 'b7'],
+  'level-2': ['1', 'b3', '4', 'b5', '5', 'b7'],
   'level-3': ['1', 'b3', '4', '5', 'b7'],
 }
 const LEVEL_DURATIONS: Record<GeneratorLevelId, number[]> = {
@@ -82,8 +82,8 @@ const LEVEL_DURATIONS: Record<GeneratorLevelId, number[]> = {
   'level-3': [0.5, 1],
 }
 export const GENERATOR_LEVEL_OPTIONS: Array<{ id: GeneratorLevelId; label: string; description: string }> = [
-  { id: 'level-1', label: 'Level 1: 3 Notes (1, b3, 5)', description: 'Start with the core blues triad tones.' },
-  { id: 'level-2', label: 'Level 2: Minor Pentatonic', description: 'Unlock full minor pentatonic shape.' },
+  { id: 'level-1', label: 'Level 1: Minor Pentatonic', description: 'Foundation: 1, b3, 4, 5, b7.' },
+  { id: 'level-2', label: 'Level 2: Pentatonic + Blue Note', description: 'Add b5 for the blues color tone.' },
   { id: 'level-3', label: 'Level 3: + Chord Tones', description: 'Minor pentatonic plus harmonic targeting.' },
 ]
 export const GENERATOR_LEVEL_CONFIG: Record<

@@ -285,7 +285,7 @@ describe('musicGenerator helpers', () => {
 })
 
 describe('createPermutationLick level constraints', () => {
-  it('level-1 only emits 1, b3, 5 degrees', () => {
+  it('level-1 only emits minor pentatonic degrees', () => {
     const allowed = new Set(DEGREE_LEVEL_PRESETS['level-1'])
     const seen = new Set<string>()
 
@@ -299,7 +299,7 @@ describe('createPermutationLick level constraints', () => {
     expect(seen.size).toBeGreaterThan(0)
   })
 
-  it('level-2 only emits minor pentatonic degrees', () => {
+  it('level-2 only emits pentatonic + blue-note degrees', () => {
     const allowed = new Set(DEGREE_LEVEL_PRESETS['level-2'])
 
     for (let i = 0; i < 32; i += 1) {
